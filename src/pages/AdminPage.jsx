@@ -511,7 +511,7 @@ export default function AdminPage() {
       fd.append("description", oDesc || "");
 
       // ✅ صورة واحدة فقط
-      if (oThumbFiles[0]) fd.append("thumbnails", oThumbFiles[0]);
+     if (oThumbFiles[0]) fd.append("images", oThumbFiles[0]);
 
       if (occasionMode === "add") {
         await api.post(`/services/${targetServiceId}/occasions`, fd, {

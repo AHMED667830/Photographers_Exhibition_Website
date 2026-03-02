@@ -146,7 +146,7 @@ function ServiceCard({ service, isFirst, onHoverPrefetch }) {
             fading ? "opacity-0" : "opacity-100"
           }`}
           loading={isFirst ? "eager" : "lazy"}
-          fetchpriority={isFirst ? "high" : "auto"}
+          fetchPriority={isFirst ? "high" : "auto"}
           decoding="async"
           onLoad={() => loadedRef.current.add(currentSrc)}
         />

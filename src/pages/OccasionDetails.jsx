@@ -2,8 +2,8 @@ import { useMemo } from "react";
 import { useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import api from "../api";
-import Footer from "../components/Footer";
-import Header from "../components/header";
+
+
 
 const ASSET_BASE = import.meta.env.VITE_ASSET_BASE_URL;
 
@@ -128,7 +128,7 @@ export default function OccasionDetails() {
 
   return (
     <section className="min-h-screen bg-[#202C28] font-Vazirmatn">
-      <Header />
+    
 
       {/* ===== HERO ===== */}
       <div dir="rtl" className="relative h-[100vh] min-h-[380px] bg-[#202C28] overflow-hidden">
@@ -190,14 +190,14 @@ export default function OccasionDetails() {
             </div>
           ) : null}
 
-          <div className="mt-10 space-y-5">
+          <div className="mt-10 space-y-5 overflow-hidden h-full">
             {photoUrls.map((src, i) => (
               <img
                 key={src + i}
                 src={src}
                 alt=""
-                className="w-full rounded h-full object-cover"
-                style={{ aspectRatio: "16 / 9" }}
+                className="block w-full h-full rounded  "
+               
                 loading="lazy"
               />
             ))}
