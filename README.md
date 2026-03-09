@@ -1,10 +1,8 @@
 # منصة عرض الخدمات ومعرض الأعمال | Services Showcase & Portfolio Platform
 
-> README عربي + English لمشروع منصة عرض الخدمات ومعرض الأعمال مع لوحة تحكم قوية وسهلة الاستخدام.
-
 ---
 
-# العربية
+# العربية (Arabic)
 
 ## نظرة عامة
 
@@ -118,9 +116,13 @@
 - الصور يتم تحسينها عبر الضغط والتحويل إلى WebP
 - يدعم النظام إدارة المحتوى من لوحة التحكم بشكل مباشر
 
+## للمشاهدة بعض المستخدمين
+1- [موقع عمر المحيميد](https://mohaimeed.art/)
+
+
 ---
 
-# English
+# English (الإنجليزية)
 
 ## Overview
 
@@ -246,3 +248,7 @@ You can customize the license section based on your needs.
 ## Author
 
 Developed as a modern services showcase and portfolio platform with an easy-to-manage dashboard.
+
+
+## For viewing by some users
+1-[Omar Al-Mohaimeed's website](https://mohaimeed.art/)
