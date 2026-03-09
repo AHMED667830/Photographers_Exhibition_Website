@@ -331,6 +331,7 @@ export default function AdminPage() {
   const [oDesc, setODesc] = useState("");
   const [oDate, setODate] = useState("");
   const [oShowBlessing, setOShowBlessing] = useState(true);
+  const [oVideoUrl, setOVideoUrl] = useState("");
 
   const [oThumbFiles, setOThumbFiles] = useState([]);
   const [oThumbPreviews, setOThumbPreviews] = useState([]);
@@ -463,6 +464,46 @@ export default function AdminPage() {
     const baseAsset = import.meta.env.VITE_ASSET_BASE_URL || "";
     const base = baseAsset.endsWith("/") ? baseAsset : baseAsset + "/";
     return `${base}uploads/${filename}`;
+  }
+
+  function extractYoutubeVideoId(url = "") {
+    if (!url) return "";
+
+    try {
+      const parsed = new URL(url);
+
+      if (parsed.hostname.includes("youtube.com")) {
+        const v = parsed.searchParams.get("v");
+        if (v) return v;
+
+        const parts = parsed.pathname.split("/").filter(Boolean);
+
+        const embedIndex = parts.indexOf("embed");
+        if (embedIndex !== -1 && parts[embedIndex + 1]) {
+          return parts[embedIndex + 1];
+        }
+
+        const shortsIndex = parts.indexOf("shorts");
+        if (shortsIndex !== -1 && parts[shortsIndex + 1]) {
+          return parts[shortsIndex + 1];
+        }
+      }
+
+      if (parsed.hostname.includes("youtu.be")) {
+        const parts = parsed.pathname.split("/").filter(Boolean);
+        if (parts[0]) return parts[0];
+      }
+
+      return "";
+    } catch {
+      return "";
+    }
+  }
+
+  function getYoutubeEmbedUrl(url = "") {
+    const id = extractYoutubeVideoId(url);
+    if (!id) return "";
+    return `https://www.youtube.com/embed/${id}`;
   }
 
   function syncServicePreviewsFromFiles(files) {
@@ -732,6 +773,7 @@ export default function AdminPage() {
     setODesc("");
     setODate("");
     setOShowBlessing(true);
+    setOVideoUrl("");
 
     setOThumbFiles([]);
     setOThumbPreviews([]);
@@ -749,6 +791,7 @@ export default function AdminPage() {
     setODesc(occasion?.description || "");
     setODate(occasion?.date || "");
     setOShowBlessing(typeof occasion?.showBlessing === "boolean" ? occasion.showBlessing : true);
+    setOVideoUrl(occasion?.videoUrl || "");
 
     setOExistingThumbUrls(getOccasionThumbUrls(occasion));
     setOThumbFiles([]);
@@ -772,8 +815,8 @@ export default function AdminPage() {
       fd.append("date", oDate || "");
       fd.append("description", oDesc || "");
       fd.append("showBlessing", String(oShowBlessing));
+      fd.append("videoUrl", oVideoUrl || "");
 
-      // كما طلبت
       if (oThumbFiles[0]) fd.append("images", oThumbFiles[0]);
 
       if (occasionMode === "add") {
@@ -795,6 +838,7 @@ export default function AdminPage() {
       setOExistingThumbUrls([]);
       setEditingOccasion(null);
       setOccasionMode("add");
+      setOVideoUrl("");
 
       await fetchOccasionsForService(targetServiceId);
       await fetchStats();
@@ -1122,6 +1166,9 @@ export default function AdminPage() {
                         <div className="text-right">
                           <div className="font-Vazirmatn text-[#202C28] font-semibold">{o.title}</div>
                           {o.date ? <div className="text-xs text-[#202C28]/70">{o.date}</div> : null}
+                          {o.videoUrl ? (
+                            <div className="text-xs text-[#3C635A] mt-1">يوجد رابط يوتيوب</div>
+                          ) : null}
                         </div>
                       }
                       left={
@@ -1281,6 +1328,7 @@ export default function AdminPage() {
             setOExistingThumbUrls([]);
             setEditingOccasion(null);
             setOccasionMode("add");
+            setOVideoUrl("");
             setOpenOccasionModal(false);
           }}
           title={occasionMode === "add" ? "إضافة" : "تعديل"}
@@ -1301,6 +1349,41 @@ export default function AdminPage() {
               <FieldLabel>وصف الصفحة</FieldLabel>
               <Textarea value={oDesc} onChange={(e) => setODesc(e.target.value)} />
             </div>
+
+            <div>
+              <FieldLabel>رابط يوتيوب</FieldLabel>
+              <Input
+                type="url"
+                dir="ltr"
+                placeholder="https://www.youtube.com/watch?v=XXXX"
+                value={oVideoUrl}
+                onChange={(e) => setOVideoUrl(e.target.value)}
+              />
+              <div className="text-right text-xs text-[#3C635A]/70 mt-2 font-Vazirmatn">
+                يدعم روابط watch و youtu.be و shorts
+              </div>
+            </div>
+
+            {oVideoUrl && getYoutubeEmbedUrl(oVideoUrl) ? (
+              <div>
+                <FieldLabel>معاينة الفيديو</FieldLabel>
+                <div className="rounded-md overflow-hidden border border-[#3C635A]/20 bg-black">
+                  <iframe
+                    className="w-full aspect-video"
+                    src={getYoutubeEmbedUrl(oVideoUrl)}
+                    title="YouTube video preview"
+                    frameBorder="0"
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                    referrerPolicy="strict-origin-when-cross-origin"
+                    allowFullScreen
+                  />
+                </div>
+              </div>
+            ) : oVideoUrl ? (
+              <div className="text-sm text-red-600 font-Vazirmatn text-right">
+                رابط اليوتيوب غير صحيح
+              </div>
+            ) : null}
 
             <div>
               <FieldLabel>المخطوطة الجاهزة</FieldLabel>
