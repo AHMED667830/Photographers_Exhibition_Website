@@ -1,9 +1,8 @@
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
+import { Helmet } from "react-helmet-async";
 import api from "../api";
-
-
 
 const ASSET_BASE = import.meta.env.VITE_ASSET_BASE_URL;
 
@@ -26,7 +25,6 @@ async function fetchOccasions(serviceId) {
 }
 
 async function fetchPhotos(occasionId) {
-  // ✅ زي ما عندك (نفس الرابط)
   const res = await api.get(`/uploads-manager/photos/occasion/${occasionId}?t=${Date.now()}`);
   return Array.isArray(res.data) ? res.data : res.data?.data ?? [];
 }
@@ -44,10 +42,10 @@ function parseImageVal(val) {
         try {
           const doubleParsed = JSON.parse(parsed);
           if (Array.isArray(doubleParsed)) return doubleParsed;
-        } catch (e) {}
+        } catch {}
         return parsed.split(",").map((s) => s.trim()).filter(Boolean);
       }
-    } catch (err) {
+    } catch {
       const clean = val.replace(/^["'\[]+|["'\]]+$/g, "");
       return clean.split(",").map((s) => s.trim()).filter(Boolean);
     }
@@ -68,9 +66,7 @@ function pickPhotoUrl(p) {
 
   if (!src) return "";
 
-  // ✅ نفس فكرتك: خذ اسم الملف فقط
   const filename = src.split("/").pop();
-
   const base = ASSET_BASE.endsWith("/") ? ASSET_BASE : ASSET_BASE + "/";
   return `${base}uploads/${filename}`;
 }
@@ -95,8 +91,23 @@ function getWeekdayName(dateStr) {
   return names[d.getDay()];
 }
 
+function normalizeBoolean(val, fallback = true) {
+  if (typeof val === "boolean") return val;
+  if (typeof val === "string") {
+    if (val.toLowerCase() === "true") return true;
+    if (val.toLowerCase() === "false") return false;
+    if (val === "1") return true;
+    if (val === "0") return false;
+  }
+  if (typeof val === "number") return val === 1;
+  return fallback;
+}
+
 export default function OccasionDetails() {
   const { serviceId, occasionId } = useParams();
+  useEffect(() => {
+  window.scrollTo(0, 0);
+}, [occasionId]);
 
   const { data: occasions = [] } = useQuery({
     queryKey: ["occasions", serviceId],
@@ -122,13 +133,31 @@ export default function OccasionDetails() {
   const desc = occasion.description || "";
   const date = occasion.date || "";
   const day = occasion.day || occasion.weekday || getWeekdayName(date);
-
-  // ✅ الغلاف خلف العنوان
   const cover = resolveUrl(pickOccasionCover(occasion));
+
+  // لو الباك ما رجع الحقل نخليه true حفاظًا على السلوك الحالي
+  const showBlessing = normalizeBoolean(occasion?.showBlessing, true);
+
+  const pageUrl = typeof window !== "undefined" ? window.location.href : "";
+  const metaImage = cover || photoUrls[0] || "";
 
   return (
     <section className="min-h-screen bg-[#202C28] font-Vazirmatn">
-    
+      <Helmet>
+        <title>{title}</title>
+        <meta name="description" content={desc || `شاهد تفاصيل تغطية ${title}`} />
+
+        <meta property="og:type" content="website" />
+        <meta property="og:title" content={title} />
+        <meta property="og:description" content={desc || `شاهد تفاصيل تغطية ${title}`} />
+        <meta property="og:url" content={pageUrl} />
+        {metaImage ? <meta property="og:image" content={metaImage} /> : null}
+
+        <meta name="twitter:card" content="summary_large_image" />
+        <meta name="twitter:title" content={title} />
+        <meta name="twitter:description" content={desc || `شاهد تفاصيل تغطية ${title}`} />
+        {metaImage ? <meta name="twitter:image" content={metaImage} /> : null}
+      </Helmet>
 
       {/* ===== HERO ===== */}
       <div dir="rtl" className="relative h-[100vh] min-h-[380px] bg-[#202C28] overflow-hidden">
@@ -146,9 +175,11 @@ export default function OccasionDetails() {
 
         <div className="absolute inset-0 bg-black/45" />
 
-        <div className="absolute inset-0 flex items-center justify-center px-4 z-10">
-          <h1 className="text-[#E7F2E2] text-3xl md:text-5xl font-bold text-center">{title}</h1>
-        </div>
+      <div className="absolute inset-0 flex items-center justify-center px-4 z-10">
+  <h1 className="translate-y-8 md:translate-y-12 text-[#E7F2E2] text-3xl md:text-5xl font-bold text-center">
+    {title}
+  </h1>
+</div>
       </div>
 
       {/* ===== CURVE SVG ===== */}
@@ -180,9 +211,16 @@ export default function OccasionDetails() {
             <div>{date || " "}</div>
           </div>
 
-          <div className="mt-8 flex justify-center">
-            <img src="/imgs/ppp.png" alt="بارك الله لهما" className="max-w-[100%] h-auto" loading="lazy" />
-          </div>
+          {showBlessing ? (
+            <div className="mt-8 flex justify-center">
+              <img
+                src="/imgs/ppp.png"
+                alt="بارك الله لهما"
+                className="max-w-[100%] h-auto"
+                loading="lazy"
+              />
+            </div>
+          ) : null}
 
           {desc ? (
             <div className="mt-6 text-center text-[#3C635A] leading-8 text-lg whitespace-pre-line">
@@ -196,8 +234,7 @@ export default function OccasionDetails() {
                 key={src + i}
                 src={src}
                 alt=""
-                className="block w-full h-full rounded  "
-               
+                className="block w-full h-full rounded"
                 loading="lazy"
               />
             ))}
@@ -227,8 +264,6 @@ export default function OccasionDetails() {
           </div>
         </div>
       </div>
-
-  
     </section>
   );
 }

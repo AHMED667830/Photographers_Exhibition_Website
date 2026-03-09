@@ -31,8 +31,12 @@ export default function IntroLoader({ ready }) {
         fade ? "opacity-0" : "opacity-100",
       ].join(" ")}
     >
-      <div className="text-center font-Vazirmatn text-[#E7F2E2]">
-        <div className="text-xl md:text-2xl tracking-wide">حياكم الله</div>
+      <div className="flex items-center justify-center">
+        <img
+          src="/imgs/logo.png"
+          alt="Logo"
+          className="w-28 md:w-36 object-contain"
+        />
       </div>
     </div>
   );

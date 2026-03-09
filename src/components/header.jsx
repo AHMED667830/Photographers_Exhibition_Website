@@ -64,16 +64,16 @@ text-base sm:text-lg md:text-xl"          >
       />
 
       {/* SIDE MENU */}
-      <aside
+      <aside dir="rtl"
         className={`fixed top-0 right-0 h-full w-72 sm:w-80
         transition-transform duration-300 ease-out
         ${open ? "translate-x-0" : "translate-x-full"}`}
         style={{ backgroundColor: "#202C28" }}
       >
         {/* HEADER */}
-        <div className="flex items-center justify-between p-4 border-b border-white/10">
+        <div  className="flex items-center justify-between p-4 border-b border-white/10">
           <span className="text-[#E7F2E2] font-bold text-lg">القائمة</span>
-          <button
+          <button 
             className="text-3xl text-[#E7F2E2]"
             onClick={() => setOpen(false)}
           >

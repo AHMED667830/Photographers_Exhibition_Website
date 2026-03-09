@@ -1,10 +1,85 @@
-import React, { useEffect, useMemo, useState, useRef } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Cropper from "react-easy-crop";
 import api, { getApiErrorMessage } from "../api";
 import { FiUsers } from "react-icons/fi";
 import { BsCamera } from "react-icons/bs";
 import { MdOutlinePhotoLibrary } from "react-icons/md";
 import { FaTrash, FaPen } from "react-icons/fa";
 import Header from "../components/header";
+
+/* ===================== IMAGE EDITOR HELPERS ===================== */
+
+function createImage(url) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.addEventListener("load", () => resolve(image));
+    image.addEventListener("error", (error) => reject(error));
+    image.setAttribute("crossOrigin", "anonymous");
+    image.src = url;
+  });
+}
+
+function getRadianAngle(degreeValue) {
+  return (degreeValue * Math.PI) / 180;
+}
+
+function rotateSize(width, height, rotation) {
+  const rotRad = getRadianAngle(rotation);
+  return {
+    width: Math.abs(Math.cos(rotRad) * width) + Math.abs(Math.sin(rotRad) * height),
+    height: Math.abs(Math.sin(rotRad) * width) + Math.abs(Math.cos(rotRad) * height),
+  };
+}
+
+async function getCroppedImg(imageSrc, pixelCrop, rotation = 0) {
+  const image = await createImage(imageSrc);
+
+  const canvas = document.createElement("canvas");
+  const ctx = canvas.getContext("2d");
+
+  const rotRad = getRadianAngle(rotation);
+  const { width: bBoxWidth, height: bBoxHeight } = rotateSize(image.width, image.height, rotation);
+
+  canvas.width = bBoxWidth;
+  canvas.height = bBoxHeight;
+
+  ctx.translate(bBoxWidth / 2, bBoxHeight / 2);
+  ctx.rotate(rotRad);
+  ctx.translate(-image.width / 2, -image.height / 2);
+  ctx.drawImage(image, 0, 0);
+
+  const croppedCanvas = document.createElement("canvas");
+  const croppedCtx = croppedCanvas.getContext("2d");
+
+  croppedCanvas.width = pixelCrop.width;
+  croppedCanvas.height = pixelCrop.height;
+
+  croppedCtx.drawImage(
+    canvas,
+    pixelCrop.x,
+    pixelCrop.y,
+    pixelCrop.width,
+    pixelCrop.height,
+    0,
+    0,
+    pixelCrop.width,
+    pixelCrop.height
+  );
+
+  return new Promise((resolve, reject) => {
+    croppedCanvas.toBlob(
+      (blob) => {
+        if (!blob) {
+          reject(new Error("تعذر إنشاء الصورة"));
+          return;
+        }
+        resolve(blob);
+      },
+      "image/jpeg",
+      0.95
+    );
+  });
+}
 
 /* ===================== UI HELPERS ===================== */
 
@@ -130,24 +205,73 @@ function Toast({ open, type = "success", msg, onClose }) {
   );
 }
 
+function Dropzone({
+  onFiles,
+  multiple = false,
+  disabled = false,
+  title = "اسحب الصور هنا أو اضغط للاختيار",
+  hint = "",
+  children,
+}) {
+  const [dragging, setDragging] = useState(false);
+
+  function handleDragOver(e) {
+    e.preventDefault();
+    if (disabled) return;
+    setDragging(true);
+  }
+
+  function handleDragLeave(e) {
+    e.preventDefault();
+    setDragging(false);
+  }
+
+  function handleDrop(e) {
+    e.preventDefault();
+    if (disabled) return;
+    setDragging(false);
+
+    const files = Array.from(e.dataTransfer.files || []);
+    if (!files.length) return;
+
+    const imageFiles = files.filter((f) => f.type.startsWith("image/"));
+    onFiles(multiple ? imageFiles : imageFiles.slice(0, 1));
+  }
+
+  return (
+    <div
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+      className={[
+        "rounded-md border-2 border-dashed p-4 transition",
+        dragging ? "border-[#D8AC4B] bg-[#3C635A]/10" : "border-[#3C635A]/30 bg-white/40",
+        disabled ? "opacity-50 pointer-events-none" : "",
+      ].join(" ")}
+    >
+      <div className="flex flex-col items-center gap-3 text-center">
+        {children}
+        <div className="font-Vazirmatn text-sm text-[#3C635A]">{title}</div>
+        {hint ? <div className="font-Vazirmatn text-xs text-[#3C635A]/70">{hint}</div> : null}
+      </div>
+    </div>
+  );
+}
+
 /* ===================== MAIN ===================== */
 
 export default function AdminPage() {
-  // ✅ PROTECTED SERVICES (no delete button)
   const PROTECTED_SERVICE_IDS = useMemo(() => new Set([1, 2]), []);
   function isProtectedService(service) {
     return PROTECTED_SERVICE_IDS.has(Number(service?.id));
   }
 
-  // ====== DATA ======
   const [stats, setStats] = useState({ services: 0, occasions: 0, totalPhotos: 0 });
   const [services, setServices] = useState([]);
-  const [occasionsByService, setOccasionsByService] = useState({}); // serviceId -> occasions[]
+  const [occasionsByService, setOccasionsByService] = useState({});
 
-  // ====== UI ======
   const [loading, setLoading] = useState(true);
 
-  // ====== Toast ======
   const toastTimerRef = useRef(null);
   const [toast, setToast] = useState({ open: false, type: "success", msg: "" });
 
@@ -165,11 +289,9 @@ export default function AdminPage() {
     showToast("error", apiMsg);
   }
 
-  // ====== MODALS ======
   const [openServiceModal, setOpenServiceModal] = useState(false);
   const [openOccasionModal, setOpenOccasionModal] = useState(false);
 
-  // ====== CONFIRM MODAL ======
   const [confirm, setConfirm] = useState({
     open: false,
     title: "",
@@ -192,26 +314,26 @@ export default function AdminPage() {
     });
   }
 
-  // ====== SERVICE FORM (add/edit) ======
-  const [serviceMode, setServiceMode] = useState("add"); // add | edit
+  // ====== SERVICE FORM ======
+  const [serviceMode, setServiceMode] = useState("add");
   const [editingService, setEditingService] = useState(null);
   const [sName, setSName] = useState("");
-  const [sCovers, setSCovers] = useState([]); // ملفات جديدة
-  const [sCoverPreviews, setSCoverPreviews] = useState([]); // معاينات جديدة
-  const [sExistingCoverUrls, setSExistingCoverUrls] = useState([]); // روابط الغلاف الحالية
+  const [sCovers, setSCovers] = useState([]);
+  const [sCoverPreviews, setSCoverPreviews] = useState([]);
+  const [sExistingCoverUrls, setSExistingCoverUrls] = useState([]);
 
-  // ====== OCCASION FORM (add/edit) ======
-  const [occasionMode, setOccasionMode] = useState("add"); // add | edit
+  // ====== OCCASION FORM ======
+  const [occasionMode, setOccasionMode] = useState("add");
   const [editingOccasion, setEditingOccasion] = useState(null);
 
   const [targetServiceId, setTargetServiceId] = useState(null);
   const [oTitle, setOTitle] = useState("");
   const [oDesc, setODesc] = useState("");
   const [oDate, setODate] = useState("");
+  const [oShowBlessing, setOShowBlessing] = useState(true);
 
-  // ✅ كفر واحد فقط للتغطية
-  const [oThumbFiles, setOThumbFiles] = useState([]); // always 0 or 1
-  const [oThumbPreviews, setOThumbPreviews] = useState([]); // always 0 or 1
+  const [oThumbFiles, setOThumbFiles] = useState([]);
+  const [oThumbPreviews, setOThumbPreviews] = useState([]);
   const [oExistingThumbUrls, setOExistingThumbUrls] = useState([]);
 
   // ====== ALBUM MANAGER ======
@@ -225,7 +347,21 @@ export default function AdminPage() {
   const [uploadImages, setUploadImages] = useState([]);
   const [uploadPreviews, setUploadPreviews] = useState([]);
 
-  // ✅ Progress للرفع بالدفعات
+  // ====== IMAGE EDITOR ======
+  const [openCoverEditor, setOpenCoverEditor] = useState(false);
+  const [editorImageSrc, setEditorImageSrc] = useState("");
+  const [editorTarget, setEditorTarget] = useState(null); // "occasion-cover" | "service-cover-replace"
+  const [editingServiceCoverIndex, setEditingServiceCoverIndex] = useState(null);
+  const [crop, setCrop] = useState({ x: 0, y: 0 });
+  const [zoom, setZoom] = useState(1);
+  const [rotation, setRotation] = useState(0);
+  const [croppedAreaPixels, setCroppedAreaPixels] = useState(null);
+
+  const onCropComplete = useCallback((_, areaPixels) => {
+    setCroppedAreaPixels(areaPixels);
+  }, []);
+
+  // ====== UPLOAD PROGRESS ======
   const [batchProg, setBatchProg] = useState({
     running: false,
     uploaded: 0,
@@ -253,6 +389,13 @@ export default function AdminPage() {
     });
   }
 
+  function revokeOne(url) {
+    if (!url) return;
+    try {
+      URL.revokeObjectURL(url);
+    } catch {}
+  }
+
   function toNumber(v) {
     const n = Number(v);
     return Number.isFinite(n) ? n : 0;
@@ -261,22 +404,31 @@ export default function AdminPage() {
   function toArr(val) {
     if (!val) return [];
     if (Array.isArray(val)) return val;
+
     if (typeof val === "string") {
       try {
         const parsed = JSON.parse(val);
         if (Array.isArray(parsed)) return parsed;
+
         if (typeof parsed === "string") {
           try {
             const doubleParsed = JSON.parse(parsed);
             if (Array.isArray(doubleParsed)) return doubleParsed;
           } catch {}
-          return parsed.split(",").map((s) => s.trim()).filter(Boolean);
+          return parsed
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean);
         }
       } catch {
         const clean = val.replace(/^["'\[]+|["'\]]+$/g, "");
-        return clean.split(",").map((s) => s.trim()).filter(Boolean);
+        return clean
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean);
       }
     }
+
     return [val];
   }
 
@@ -303,7 +455,6 @@ export default function AdminPage() {
     return Array.from(new Set(arr.map(getAbsoluteUrlMaybe).filter(Boolean)));
   }
 
-  // ✅ نفس طريقة رابط صورك (uploads/filename)
   function getPhotoSrc(p) {
     let src = p?.imageUrl || p?.url || p?.src || "";
     if (!src) return "";
@@ -314,7 +465,114 @@ export default function AdminPage() {
     return `${base}uploads/${filename}`;
   }
 
-  /* ===================== API FETCH (NO CHANGES) ===================== */
+  function syncServicePreviewsFromFiles(files) {
+    revokeAll(sCoverPreviews);
+    setSCovers(files);
+    setSCoverPreviews(files.map((f) => URL.createObjectURL(f)));
+  }
+
+  function mergeServiceFiles(picked) {
+    if (!picked.length) return;
+
+    const onlyImages = picked.filter((f) => f.type.startsWith("image/"));
+    if (!onlyImages.length) return;
+
+    const merged = [...sCovers, ...onlyImages].slice(0, 5);
+
+    if (sCovers.length + onlyImages.length > 5) {
+      showToast("error", "حد الصور 5 فقط (تم تجاهل الزائد)");
+    }
+
+    syncServicePreviewsFromFiles(merged);
+  }
+
+  function mergeAlbumFiles(picked) {
+    if (!picked.length) return;
+    const onlyImages = picked.filter((f) => f.type.startsWith("image/"));
+
+    revokeAll(uploadPreviews);
+    setUploadImages(onlyImages);
+    setUploadPreviews(onlyImages.map((f) => URL.createObjectURL(f)));
+  }
+
+  function openOccasionCoverEditorFromFile(file) {
+    if (!file) return;
+    const src = URL.createObjectURL(file);
+
+    if (editorImageSrc) revokeOne(editorImageSrc);
+
+    setEditorImageSrc(src);
+    setEditorTarget("occasion-cover");
+    setEditingServiceCoverIndex(null);
+    setCrop({ x: 0, y: 0 });
+    setZoom(1);
+    setRotation(0);
+    setCroppedAreaPixels(null);
+    setOpenCoverEditor(true);
+  }
+
+  function openServiceCoverEditorFromFile(file, index) {
+    if (!file) return;
+    const src = URL.createObjectURL(file);
+
+    if (editorImageSrc) revokeOne(editorImageSrc);
+
+    setEditorImageSrc(src);
+    setEditorTarget("service-cover-replace");
+    setEditingServiceCoverIndex(index);
+    setCrop({ x: 0, y: 0 });
+    setZoom(1);
+    setRotation(0);
+    setCroppedAreaPixels(null);
+    setOpenCoverEditor(true);
+  }
+
+  function closeEditorModal() {
+    setOpenCoverEditor(false);
+    revokeOne(editorImageSrc);
+    setEditorImageSrc("");
+    setEditorTarget(null);
+    setEditingServiceCoverIndex(null);
+    setCrop({ x: 0, y: 0 });
+    setZoom(1);
+    setRotation(0);
+    setCroppedAreaPixels(null);
+  }
+
+  async function saveEditedCover() {
+    try {
+      if (!editorImageSrc || !croppedAreaPixels) {
+        showToast("error", "تعذر تجهيز الصورة");
+        return;
+      }
+
+      const blob = await getCroppedImg(editorImageSrc, croppedAreaPixels, rotation);
+      const file = new File([blob], `cover-${Date.now()}.jpg`, { type: "image/jpeg" });
+      const preview = URL.createObjectURL(file);
+
+      if (editorTarget === "occasion-cover") {
+        revokeAll(oThumbPreviews);
+        setOThumbFiles([file]);
+        setOThumbPreviews([preview]);
+      }
+
+      if (editorTarget === "service-cover-replace" && editingServiceCoverIndex !== null) {
+        const nextFiles = [...sCovers];
+        nextFiles[editingServiceCoverIndex] = file;
+
+        revokeOne(preview);
+        syncServicePreviewsFromFiles(nextFiles);
+      }
+
+      closeEditorModal();
+      showToast("success", "تم تجهيز الصورة ✅");
+    } catch (err) {
+      console.error(err);
+      showToast("error", "فشل تعديل الصورة");
+    }
+  }
+
+  /* ===================== API FETCH ===================== */
 
   async function fetchStats() {
     const res = await api.get("/admin/stats");
@@ -366,12 +624,14 @@ export default function AdminPage() {
 
   useEffect(() => {
     init();
+
     return () => {
       if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
 
       revokeAll(sCoverPreviews);
       revokeAll(oThumbPreviews);
       revokeAll(uploadPreviews);
+      revokeOne(editorImageSrc);
     };
     // eslint-disable-next-line
   }, []);
@@ -412,6 +672,7 @@ export default function AdminPage() {
     try {
       const fd = new FormData();
       fd.append("name", sName);
+
       [...sCovers].slice(0, 5).forEach((f) => fd.append("coverImages", f));
 
       if (serviceMode === "add") {
@@ -470,6 +731,7 @@ export default function AdminPage() {
     setOTitle("");
     setODesc("");
     setODate("");
+    setOShowBlessing(true);
 
     setOThumbFiles([]);
     setOThumbPreviews([]);
@@ -486,6 +748,7 @@ export default function AdminPage() {
     setOTitle(occasion?.title || "");
     setODesc(occasion?.description || "");
     setODate(occasion?.date || "");
+    setOShowBlessing(typeof occasion?.showBlessing === "boolean" ? occasion.showBlessing : true);
 
     setOExistingThumbUrls(getOccasionThumbUrls(occasion));
     setOThumbFiles([]);
@@ -493,7 +756,6 @@ export default function AdminPage() {
     setOpenOccasionModal(true);
   }
 
-  // ✅ form-data: title, date, description, thumbnails(file واحد)
   async function submitOccasion(e) {
     e.preventDefault();
     if (!targetServiceId) return;
@@ -509,9 +771,10 @@ export default function AdminPage() {
       fd.append("title", oTitle);
       fd.append("date", oDate || "");
       fd.append("description", oDesc || "");
+      fd.append("showBlessing", String(oShowBlessing));
 
-      // ✅ صورة واحدة فقط
-     if (oThumbFiles[0]) fd.append("images", oThumbFiles[0]);
+      // كما طلبت
+      if (oThumbFiles[0]) fd.append("images", oThumbFiles[0]);
 
       if (occasionMode === "add") {
         await api.post(`/services/${targetServiceId}/occasions`, fd, {
@@ -530,6 +793,8 @@ export default function AdminPage() {
       setOThumbPreviews([]);
       setOThumbFiles([]);
       setOExistingThumbUrls([]);
+      setEditingOccasion(null);
+      setOccasionMode("add");
 
       await fetchOccasionsForService(targetServiceId);
       await fetchStats();
@@ -634,7 +899,6 @@ export default function AdminPage() {
     }
   }
 
-  // ✅ رفع دفعات (نفس API، نفس الحقول)
   async function uploadInBatchesSameApi({ occasionId, allFiles }) {
     const BATCH_SIZE = 50;
     const totalBatches = Math.ceil(allFiles.length / BATCH_SIZE);
@@ -734,7 +998,9 @@ export default function AdminPage() {
   }
 
   async function uploadFromManager() {
-    if (!uploadOccasionId || uploadImages.length === 0) return showToast("error", "اختر صور قبل الرفع");
+    if (!uploadOccasionId || uploadImages.length === 0) {
+      return showToast("error", "اختر صور قبل الرفع");
+    }
 
     try {
       showToast("success", `بدء رفع ${uploadImages.length} صورة على دفعات...`);
@@ -911,7 +1177,7 @@ export default function AdminPage() {
             setOpenServiceModal(false);
           }}
           title={serviceMode === "add" ? "إضافة قسم" : "تعديل قسم"}
-          max="max-w-3xl"
+          max="max-w-4xl"
         >
           <form onSubmit={submitService} className="space-y-6">
             <div>
@@ -921,28 +1187,28 @@ export default function AdminPage() {
 
             <div>
               <FieldLabel>صور القسم (حد أقصى 5)</FieldLabel>
-              <label className="cursor-pointer bg-[#3C635A] text-white px-6 py-3 rounded-md inline-block">
-                اختيار الصور
-                <input
-                  type="file"
-                  multiple
-                  accept="image/*"
-                  className="hidden"
-                  onChange={(e) => {
-                    const picked = Array.from(e.target.files || []);
-                    if (!picked.length) return;
 
-                    const merged = [...sCovers, ...picked].slice(0, 5);
-                    if (sCovers.length + picked.length > 5)
-                      showToast("error", "حد الصور 5 فقط (تم تجاهل الزائد)");
-
-                    revokeAll(sCoverPreviews);
-                    setSCovers(merged);
-                    setSCoverPreviews(merged.map((f) => URL.createObjectURL(f)));
-                    e.target.value = null;
-                  }}
-                />
-              </label>
+              <Dropzone
+                multiple
+                onFiles={(picked) => mergeServiceFiles(picked)}
+                title="اسحب صور القسم هنا أو اضغط للاختيار"
+                hint="يمكنك بعد الإضافة تعديل أي صورة من الصور المختارة"
+              >
+                <label className="cursor-pointer bg-[#3C635A] text-white px-6 py-3 rounded-md inline-block">
+                  اختيار الصور
+                  <input
+                    type="file"
+                    multiple
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => {
+                      const picked = Array.from(e.target.files || []);
+                      mergeServiceFiles(picked);
+                      e.target.value = null;
+                    }}
+                  />
+                </label>
+              </Dropzone>
 
               {serviceMode === "edit" && sExistingCoverUrls.length > 0 && (
                 <div className="mt-4">
@@ -966,16 +1232,30 @@ export default function AdminPage() {
                     {sCoverPreviews.map((src, idx) => (
                       <div key={idx} className="relative rounded-md overflow-hidden border border-[#3C635A]/20">
                         <img src={src} alt={`new-cover-${idx}`} className="w-full h-24 sm:h-28 object-cover" />
-                        <button
-                          type="button"
-                          className="absolute top-1 right-1 bg-red-500 hover:bg-red-600 text-white rounded-md p-1.5 shadow"
-                          onClick={() => {
-                            setSCovers((prev) => prev.filter((_, i) => i !== idx));
-                            setSCoverPreviews((prev) => prev.filter((_, i) => i !== idx));
-                          }}
-                        >
-                          <FaTrash size={12} />
-                        </button>
+
+                        <div className="absolute top-1 right-1 flex gap-1">
+                          <button
+                            type="button"
+                            className="bg-yellow-500 hover:bg-yellow-600 text-white rounded-md p-1.5 shadow"
+                            onClick={() => openServiceCoverEditorFromFile(sCovers[idx], idx)}
+                            title="تعديل الصورة"
+                          >
+                            <FaPen size={12} />
+                          </button>
+
+                          <button
+                            type="button"
+                            className="bg-red-500 hover:bg-red-600 text-white rounded-md p-1.5 shadow"
+                            onClick={() => {
+                              revokeOne(sCoverPreviews[idx]);
+                              const nextFiles = sCovers.filter((_, i) => i !== idx);
+                              syncServicePreviewsFromFiles(nextFiles);
+                            }}
+                            title="حذف الصورة"
+                          >
+                            <FaTrash size={12} />
+                          </button>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -1022,26 +1302,47 @@ export default function AdminPage() {
               <Textarea value={oDesc} onChange={(e) => setODesc(e.target.value)} />
             </div>
 
-            {/* ✅ كفر واحد فقط */}
             <div>
-              <FieldLabel>كفر التغطية (صورة واحدة فقط)</FieldLabel>
-              <label className="cursor-pointer bg-[#3C635A] text-white px-6 py-3 rounded-md inline-block">
-                اختيار صورة
+              <FieldLabel>المخطوطة الجاهزة</FieldLabel>
+              <label className="flex items-center justify-between gap-3 bg-[#E7F2E2] rounded-md px-4 py-3 font-Vazirmatn text-[#3C635A]">
+                <span>إظهار مخطوطة "بارك الله لهما"</span>
                 <input
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                  onChange={(e) => {
-                    const file = (e.target.files || [])[0];
-                    if (!file) return;
-
-                    revokeAll(oThumbPreviews);
-                    setOThumbFiles([file]);
-                    setOThumbPreviews([URL.createObjectURL(file)]);
-                    e.target.value = null;
-                  }}
+                  type="checkbox"
+                  checked={oShowBlessing}
+                  onChange={(e) => setOShowBlessing(e.target.checked)}
+                  className="w-5 h-5 accent-[#3C635A]"
                 />
               </label>
+            </div>
+
+            <div>
+              <FieldLabel>كفر التغطية (صورة واحدة فقط)</FieldLabel>
+
+              <Dropzone
+                multiple={false}
+                onFiles={(files) => {
+                  const file = files?.[0];
+                  if (!file) return;
+                  openOccasionCoverEditorFromFile(file);
+                }}
+                title="اسحب صورة الكفر هنا أو اضغط للاختيار"
+                hint="بعد اختيار الصورة سيفتح محرر الكفر"
+              >
+                <label className="cursor-pointer bg-[#3C635A] text-white px-6 py-3 rounded-md inline-block">
+                  اختيار صورة
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = (e.target.files || [])[0];
+                      if (!file) return;
+                      openOccasionCoverEditorFromFile(file);
+                      e.target.value = null;
+                    }}
+                  />
+                </label>
+              </Dropzone>
 
               {occasionMode === "edit" && oExistingThumbUrls.length > 0 && (
                 <div className="mt-4">
@@ -1063,8 +1364,19 @@ export default function AdminPage() {
                   </div>
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                     {oThumbPreviews.map((src, i) => (
-                      <div key={i} className="rounded-md overflow-hidden border border-[#3C635A]/20">
+                      <div key={i} className="relative rounded-md overflow-hidden border border-[#3C635A]/20">
                         <img src={src} alt={`new-thumb-${i}`} className="w-full h-24 sm:h-28 object-cover" />
+                        <button
+                          type="button"
+                          className="absolute top-1 right-1 bg-red-500 hover:bg-red-600 text-white rounded-md p-1.5 shadow"
+                          onClick={() => {
+                            revokeOne(oThumbPreviews[i]);
+                            setOThumbFiles([]);
+                            setOThumbPreviews([]);
+                          }}
+                        >
+                          <FaTrash size={12} />
+                        </button>
                       </div>
                     ))}
                   </div>
@@ -1106,34 +1418,43 @@ export default function AdminPage() {
           max="max-w-5xl"
         >
           <div className="bg-white/70 rounded-md p-3 border border-[#3C635A]/20 mb-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="space-y-3">
               <div className="font-Vazirmatn text-[#3C635A] font-semibold">رفع صور جديدة</div>
 
-              <label className="cursor-pointer bg-[#3C635A] text-white px-4 py-2 rounded-md inline-block">
-                اختيار الصور
-                <input
-                  type="file"
-                  multiple
-                  accept="image/*"
-                  className="hidden"
-                  disabled={batchProg.running}
-                  onChange={(e) => {
-                    revokeAll(uploadPreviews);
-                    const files = Array.from(e.target.files || []);
-                    setUploadImages(files);
-                    setUploadPreviews(files.map((f) => URL.createObjectURL(f)));
-                  }}
-                />
-              </label>
-
-              <button
-                type="button"
-                disabled={!uploadImages.length || batchProg.running}
-                onClick={uploadFromManager}
-                className="bg-[#D8AC4B] text-white rounded-md px-4 py-2 hover:opacity-90 disabled:opacity-50"
+              <Dropzone
+                multiple
+                disabled={batchProg.running}
+                onFiles={(files) => mergeAlbumFiles(files)}
+                title="اسحب صور الألبوم هنا أو اضغط للاختيار"
+                hint="سيتم رفع الصور على دفعات"
               >
-                {batchProg.running ? "جارٍ الرفع..." : "رفع"}
-              </button>
+                <div className="flex flex-wrap items-center justify-center gap-3">
+                  <label className="cursor-pointer bg-[#3C635A] text-white px-4 py-2 rounded-md inline-block">
+                    اختيار الصور
+                    <input
+                      type="file"
+                      multiple
+                      accept="image/*"
+                      className="hidden"
+                      disabled={batchProg.running}
+                      onChange={(e) => {
+                        const files = Array.from(e.target.files || []);
+                        mergeAlbumFiles(files);
+                        e.target.value = null;
+                      }}
+                    />
+                  </label>
+
+                  <button
+                    type="button"
+                    disabled={!uploadImages.length || batchProg.running}
+                    onClick={uploadFromManager}
+                    className="bg-[#D8AC4B] text-white rounded-md px-4 py-2 hover:opacity-90 disabled:opacity-50"
+                  >
+                    {batchProg.running ? "جارٍ الرفع..." : "رفع"}
+                  </button>
+                </div>
+              </Dropzone>
             </div>
 
             {batchProg.total > 0 && (
@@ -1244,6 +1565,87 @@ export default function AdminPage() {
               </div>
             </>
           )}
+        </Modal>
+
+        {/* ===== Image Editor Modal ===== */}
+        <Modal open={openCoverEditor} onClose={closeEditorModal} title="تعديل الصورة" max="max-w-5xl">
+          <div className="space-y-5">
+            <div className="relative w-full h-[420px] rounded-md overflow-hidden bg-[#202C28]">
+              {editorImageSrc ? (
+                <Cropper
+                  image={editorImageSrc}
+                  crop={crop}
+                  zoom={zoom}
+                  rotation={rotation}
+                  aspect={16 / 9}
+                  onCropChange={setCrop}
+                  onZoomChange={setZoom}
+                  onRotationChange={setRotation}
+                  onCropComplete={onCropComplete}
+                />
+              ) : null}
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              <div>
+                <FieldLabel>التكبير / التصغير</FieldLabel>
+                <input
+                  type="range"
+                  min={1}
+                  max={3}
+                  step={0.1}
+                  value={zoom}
+                  onChange={(e) => setZoom(Number(e.target.value))}
+                  className="w-full"
+                />
+                <div className="text-sm text-[#3C635A] mt-1 font-Vazirmatn">{zoom.toFixed(1)}x</div>
+              </div>
+
+              <div>
+                <FieldLabel>اللف</FieldLabel>
+                <input
+                  type="range"
+                  min={-180}
+                  max={180}
+                  step={1}
+                  value={rotation}
+                  onChange={(e) => setRotation(Number(e.target.value))}
+                  className="w-full"
+                />
+                <div className="text-sm text-[#3C635A] mt-1 font-Vazirmatn">{rotation}°</div>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap justify-end gap-3">
+              <Button
+                type="button"
+                className="bg-white border border-[#3C635A]/20 text-[#3C635A]"
+                onClick={() => setRotation((r) => r - 90)}
+              >
+                لف يسار 90°
+              </Button>
+
+              <Button
+                type="button"
+                className="bg-white border border-[#3C635A]/20 text-[#3C635A]"
+                onClick={() => setRotation((r) => r + 90)}
+              >
+                لف يمين 90°
+              </Button>
+
+              <Button
+                type="button"
+                onClick={closeEditorModal}
+                className="bg-white border border-[#3C635A]/20 text-[#3C635A]"
+              >
+                إلغاء
+              </Button>
+
+              <Button type="button" onClick={saveEditedCover} className="bg-[#3C635A] text-white">
+                حفظ الصورة
+              </Button>
+            </div>
+          </div>
         </Modal>
 
         {/* ===== Confirm Delete Modal ===== */}

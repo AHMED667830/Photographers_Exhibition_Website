@@ -11,7 +11,7 @@ export default function Footer() {
 >           <img
             src="/imgs/Pasted_Graphic.png" // حط اسمك/شعارك الذهبي هنا
             alt="Footer Logo"
-            className="h-14 sm:h-15 md:h-17 object-contain"
+            className="h-17  object-contain"
           />
           {/* WhatsApp */}
           <a
@@ -26,7 +26,7 @@ export default function Footer() {
               transition
             "
           >
-            <FaWhatsapp className="text-2xl sm:text-3xl" />
+           <FaWhatsapp className="text-4xl sm:text-4xl" />
           </a>
 
        

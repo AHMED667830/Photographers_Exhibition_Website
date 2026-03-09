@@ -6,6 +6,15 @@ import IntroLoader from "../components/IntroLoader";
 
 const ASSET_BASE = import.meta.env.VITE_ASSET_BASE_URL;
 
+/* ========= مكان تعديل العبارات فقط ========= */
+
+const SERVICE_PHRASES = {
+  "أعراس": ["تغطيات تُخلد", "ذكريات تنبض بالحياة", "تبقى الفرحة حية"],
+  "تغطيات": ["صدارة المشهد"],
+};
+
+/* ======================================= */
+
 const resolveUrl = (p) => {
   if (!p) return "";
   if (p.startsWith("http")) return p;
@@ -45,6 +54,7 @@ async function fetchServices() {
 }
 
 /* ===== Skeleton ===== */
+
 function SkeletonServices() {
   return (
     <div className="w-full snap-y snap-mandatory">
@@ -55,7 +65,8 @@ function SkeletonServices() {
   );
 }
 
-/* ===== ServiceCard (Crossfade using TransitionEnd) ===== */
+/* ===== Service Card ===== */
+
 function ServiceCard({ service, isFirst, onHoverPrefetch }) {
   const raw = service.coverImages || service.coverImage;
 
@@ -64,19 +75,28 @@ function ServiceCard({ service, isFirst, onHoverPrefetch }) {
     return arr.map(resolveUrl).filter(Boolean);
   }, [raw]);
 
+  const phrases = SERVICE_PHRASES[service.name] || [
+    "توثيق احترافي",
+    "لحظات تبقى",
+    "تفاصيل تليق بذكراك",
+  ];
+
   const len = urls.length;
 
-  const [index, setIndex] = useState(0);     // current
-  const [nextIndex, setNextIndex] = useState(1); // next
+  const [index, setIndex] = useState(0);
+  const [nextIndex, setNextIndex] = useState(1);
   const [fading, setFading] = useState(false);
+
+  const [mode, setMode] = useState("service");
+  const [phraseIndex, setPhraseIndex] = useState(0);
 
   const intervalRef = useRef(null);
   const loadedRef = useRef(new Set());
+  const textTimerRef = useRef(null);
 
   const currentSrc = len ? urls[index % len] : "";
   const nextSrc = len ? urls[nextIndex % len] : "";
 
-  // reset on service change / images change
   useEffect(() => {
     setIndex(0);
     setNextIndex(1);
@@ -85,7 +105,6 @@ function ServiceCard({ service, isFirst, onHoverPrefetch }) {
     if (urls[0]) loadedRef.current.add(urls[0]);
   }, [service?.id, len]); // eslint-disable-line
 
-  // preload next
   useEffect(() => {
     if (!nextSrc || loadedRef.current.has(nextSrc)) return;
 
@@ -94,42 +113,86 @@ function ServiceCard({ service, isFirst, onHoverPrefetch }) {
     img.src = nextSrc;
   }, [nextSrc]);
 
-  // loop: فقط يبدأ الفيد، والـ swap يتم في transitionEnd
   useEffect(() => {
     if (len <= 1) return;
 
     if (intervalRef.current) clearInterval(intervalRef.current);
 
     intervalRef.current = setInterval(() => {
-      // لا تبدأ فيد إذا لسه فيد شغال
       if (fading) return;
-
-      // لا تبدأ فيد إلا إذا next محمّلة
       if (!nextSrc) return;
       if (!loadedRef.current.has(nextSrc)) return;
 
       setFading(true);
     }, 5000);
 
-    return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
-    };
+    return () => clearInterval(intervalRef.current);
   }, [len, nextSrc, fading]);
 
-  // لما يخلص الـ transition على صورة الـ next (وهي ظاهرة) نبدّل المؤشرات
   const onNextTransitionEnd = () => {
     if (!fading) return;
 
-    // ثبت الـ next كـ current
     setIndex(nextIndex);
-
-    // جهز التالي اللي بعده
     const ni = len ? (nextIndex + 1) % len : 0;
     setNextIndex(ni);
-
-    // رجّع الحالة عشان الدورة تكمل
     setFading(false);
   };
+
+  /* ===== النص المتحرك ===== */
+
+  useEffect(() => {
+    if (textTimerRef.current) clearTimeout(textTimerRef.current);
+
+    if (mode === "service") {
+      textTimerRef.current = setTimeout(() => {
+        setMode("service-exit");
+      }, 2000);
+    }
+
+    if (mode === "service-exit") {
+      textTimerRef.current = setTimeout(() => {
+        setPhraseIndex(0);
+        setMode("phrase");
+      }, 700);
+    }
+
+    if (mode === "phrase") {
+      textTimerRef.current = setTimeout(() => {
+        setMode("phrase-exit");
+      }, 1500);
+    }
+
+    if (mode === "phrase-exit") {
+      textTimerRef.current = setTimeout(() => {
+        if (phraseIndex < phrases.length - 1) {
+          setPhraseIndex((prev) => prev + 1);
+          setMode("phrase");
+        } else {
+          setMode("service");
+        }
+      }, 500);
+    }
+
+    return () => clearTimeout(textTimerRef.current);
+  }, [mode, phraseIndex, phrases.length]);
+
+  useEffect(() => {
+    setMode("service");
+    setPhraseIndex(0);
+  }, [service?.id]);
+
+  const showService = mode === "service" || mode === "service-exit";
+  const showPhrase = mode === "phrase" || mode === "phrase-exit";
+
+  const serviceClass =
+    mode === "service"
+      ? "opacity-100 translate-x-0"
+      : "opacity-0 translate-x-12 md:translate-x-16";
+
+  const phraseClass =
+    mode === "phrase"
+      ? "opacity-100 translate-x-0"
+      : "opacity-0 translate-x-12 md:translate-x-16";
 
   return (
     <Link
@@ -137,7 +200,6 @@ function ServiceCard({ service, isFirst, onHoverPrefetch }) {
       onMouseEnter={() => onHoverPrefetch(service.id)}
       className="relative overflow-hidden block w-full h-screen snap-start"
     >
-      {/* current image */}
       {currentSrc ? (
         <img
           src={currentSrc}
@@ -154,7 +216,6 @@ function ServiceCard({ service, isFirst, onHoverPrefetch }) {
         <div className="absolute inset-0 bg-[#202C28]" />
       )}
 
-      {/* next image */}
       {len > 1 && nextSrc ? (
         <img
           src={nextSrc}
@@ -169,17 +230,33 @@ function ServiceCard({ service, isFirst, onHoverPrefetch }) {
         />
       ) : null}
 
-      {/* overlay */}
-      <div className="absolute inset-0 bg-black/40 transition" />
+      <div className="absolute inset-0 bg-black/40" />
 
-      <h2 className="absolute inset-0 flex items-center justify-center text-white text-4xl md:text-6xl font-bold">
-        {service.name}
-      </h2>
+      <div className="absolute inset-0 flex items-center justify-center translate-y-8 md:translate-y-12 z-10">
+        <div className="relative flex items-center justify-center min-h-[90px] md:min-h-[110px] min-w-[320px] md:min-w-[500px] px-4">
+          {showService && (
+            <h2
+              className={`absolute text-white text-4xl md:text-6xl font-bold text-center transition-all duration-1000 ease-out ${serviceClass}`}
+            >
+              {service.name}
+            </h2>
+          )}
+
+          {showPhrase && (
+            <h2
+              className={`absolute text-white text-4xl md:text-6xl font-bold text-center transition-all duration-1000 ease-out ${phraseClass}`}
+            >
+              {phrases[phraseIndex]}
+            </h2>
+          )}
+        </div>
+      </div>
     </Link>
   );
 }
 
 /* ===== PAGE ===== */
+
 export default function Services() {
   const qc = useQueryClient();
 
