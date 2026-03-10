@@ -103,11 +103,62 @@ function normalizeBoolean(val, fallback = true) {
   return fallback;
 }
 
+function pickOccasionVideoUrl(occasion) {
+  return (
+    occasion?.videoUrl ||
+    occasion?.video_url ||
+    occasion?.youtubeUrl ||
+    occasion?.youtube_url ||
+    ""
+  );
+}
+
+function extractYoutubeVideoId(url = "") {
+  if (!url) return "";
+
+  try {
+    const parsed = new URL(url);
+
+    if (parsed.hostname.includes("youtube.com")) {
+      const v = parsed.searchParams.get("v");
+      if (v) return v;
+
+      const parts = parsed.pathname.split("/").filter(Boolean);
+
+      const embedIndex = parts.indexOf("embed");
+      if (embedIndex !== -1 && parts[embedIndex + 1]) {
+        return parts[embedIndex + 1];
+      }
+
+      const shortsIndex = parts.indexOf("shorts");
+      if (shortsIndex !== -1 && parts[shortsIndex + 1]) {
+        return parts[shortsIndex + 1];
+      }
+    }
+
+    if (parsed.hostname.includes("youtu.be")) {
+      const parts = parsed.pathname.split("/").filter(Boolean);
+      if (parts[0]) return parts[0];
+    }
+
+    return "";
+  } catch {
+    return "";
+  }
+}
+
+function getYoutubeEmbedUrl(url = "") {
+  const id = extractYoutubeVideoId(url);
+  if (!id) return "";
+  return `https://www.youtube.com/embed/${id}`;
+}
+
 export default function OccasionDetails() {
   const { serviceId, occasionId } = useParams();
+
   useEffect(() => {
-  window.scrollTo(0, 0);
-}, [occasionId]);
+    window.scrollTo(0, 0);
+  }, [occasionId]);
 
   const { data: occasions = [] } = useQuery({
     queryKey: ["occasions", serviceId],
@@ -134,8 +185,9 @@ export default function OccasionDetails() {
   const date = occasion.date || "";
   const day = occasion.day || occasion.weekday || getWeekdayName(date);
   const cover = resolveUrl(pickOccasionCover(occasion));
+  const videoUrl = pickOccasionVideoUrl(occasion);
+  const youtubeEmbedUrl = getYoutubeEmbedUrl(videoUrl);
 
-  // لو الباك ما رجع الحقل نخليه true حفاظًا على السلوك الحالي
   const showBlessing = normalizeBoolean(occasion?.showBlessing, true);
 
   const pageUrl = typeof window !== "undefined" ? window.location.href : "";
@@ -159,7 +211,6 @@ export default function OccasionDetails() {
         {metaImage ? <meta name="twitter:image" content={metaImage} /> : null}
       </Helmet>
 
-      {/* ===== HERO ===== */}
       <div dir="rtl" className="relative h-[100vh] min-h-[380px] bg-[#202C28] overflow-hidden">
         {cover ? (
           <img
@@ -175,14 +226,13 @@ export default function OccasionDetails() {
 
         <div className="absolute inset-0 bg-black/45" />
 
-      <div className="absolute inset-0 flex items-center justify-center px-4 z-10">
-  <h1 className="translate-y-8 md:translate-y-12 text-[#E7F2E2] text-3xl md:text-5xl font-bold text-center">
-    {title}
-  </h1>
-</div>
+        <div className="absolute inset-0 flex items-center justify-center px-4 z-10">
+          <h1 className="translate-y-8 md:translate-y-12 text-[#E7F2E2] text-3xl md:text-5xl font-bold text-center">
+            {title}
+          </h1>
+        </div>
       </div>
 
-      {/* ===== CURVE SVG ===== */}
       <div dir="rtl" className="relative z--20 -mt-16 sm:-mt-30 md:-mt-20 lg:-mt-30 pointer-events-none">
         <div className="w-screen relative left-1/2 right-1/2 -ml-[50vw] -mr-[50vw]">
           <svg
@@ -203,7 +253,6 @@ export default function OccasionDetails() {
         </div>
       </div>
 
-      {/* ===== CONTENT ===== */}
       <div dir="rtl" className="relative z-10 bg-[#DEE9D9] -mt-20 sm:-mt-24 md:-mt-28 lg:-mt-28">
         <div className="max-w-5xl mx-auto px-4 py-16">
           <div className="flex justify-between text-[#3C635A] font-semibold text-lg">
@@ -228,6 +277,22 @@ export default function OccasionDetails() {
             </div>
           ) : null}
 
+          {youtubeEmbedUrl ? (
+            <div className="mt-10">
+              <div className="rounded-md overflow-hidden border border-[#3C635A]/20 bg-black">
+                <iframe
+                  className="w-full aspect-video"
+                  src={youtubeEmbedUrl}
+                  title={title}
+                  frameBorder="0"
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                  referrerPolicy="strict-origin-when-cross-origin"
+                  allowFullScreen
+                />
+              </div>
+            </div>
+          ) : null}
+
           <div className="mt-10 space-y-5 overflow-hidden h-full">
             {photoUrls.map((src, i) => (
               <img
@@ -242,7 +307,6 @@ export default function OccasionDetails() {
         </div>
       </div>
 
-      {/* ===== CURVE قبل الفوتر ===== */}
       <div className="relative z-20 -mt-14 sm:-mt-18 md:-mt-22 lg:-mt-28 pointer-events-none">
         <div className="w-screen relative left-1/2 right-1/2 -ml-[50vw] -mr-[50vw]">
           <div className="w-full overflow-hidden">

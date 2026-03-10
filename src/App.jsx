@@ -8,6 +8,7 @@ import Footer from "./components/Footer";
 import Services from "./components/Services";
 import Commentcards from "./components/Commentcards";
 import Corporatecards from "./components/Corporatecards";
+import SiteCredit from "./components/SiteCredit";
 
 import AboutMe from "./pages/AboutMe";
 import ServiceOccasions from "./pages/ServiceOccasions";
@@ -39,6 +40,7 @@ function SiteLayout({ children }) {
       <Header />
       {children}
       <Footer />
+      <SiteCredit />
     </>
   );
 }

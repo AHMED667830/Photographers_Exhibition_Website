@@ -351,7 +351,7 @@ export default function AdminPage() {
   // ====== IMAGE EDITOR ======
   const [openCoverEditor, setOpenCoverEditor] = useState(false);
   const [editorImageSrc, setEditorImageSrc] = useState("");
-  const [editorTarget, setEditorTarget] = useState(null); // "occasion-cover" | "service-cover-replace"
+  const [editorTarget, setEditorTarget] = useState(null);
   const [editingServiceCoverIndex, setEditingServiceCoverIndex] = useState(null);
   const [crop, setCrop] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
@@ -433,6 +433,23 @@ export default function AdminPage() {
     return [val];
   }
 
+  function normalizeBoolean(val, fallback = true) {
+    if (typeof val === "boolean") return val;
+
+    if (typeof val === "string") {
+      if (val.toLowerCase() === "true") return true;
+      if (val.toLowerCase() === "false") return false;
+      if (val === "1") return true;
+      if (val === "0") return false;
+    }
+
+    if (typeof val === "number") {
+      return val === 1;
+    }
+
+    return fallback;
+  }
+
   function getAbsoluteUrlMaybe(pathOrUrl) {
     if (!pathOrUrl) return "";
     if (pathOrUrl.startsWith("http://") || pathOrUrl.startsWith("https://")) return pathOrUrl;
@@ -506,6 +523,16 @@ export default function AdminPage() {
     return `https://www.youtube.com/embed/${id}`;
   }
 
+  function pickOccasionVideoUrl(occasion) {
+    return (
+      occasion?.videoUrl ||
+      occasion?.video_url ||
+      occasion?.youtubeUrl ||
+      occasion?.youtube_url ||
+      ""
+    );
+  }
+
   function syncServicePreviewsFromFiles(files) {
     revokeAll(sCoverPreviews);
     setSCovers(files);
@@ -529,11 +556,36 @@ export default function AdminPage() {
 
   function mergeAlbumFiles(picked) {
     if (!picked.length) return;
+
     const onlyImages = picked.filter((f) => f.type.startsWith("image/"));
+    if (!onlyImages.length) return;
+
+    const merged = [...uploadImages, ...onlyImages];
+
+    const unique = [];
+    const seen = new Set();
+
+    for (const file of merged) {
+      const key = `${file.name}-${file.size}-${file.lastModified}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        unique.push(file);
+      }
+    }
 
     revokeAll(uploadPreviews);
-    setUploadImages(onlyImages);
-    setUploadPreviews(onlyImages.map((f) => URL.createObjectURL(f)));
+    setUploadImages(unique);
+    setUploadPreviews(unique.map((f) => URL.createObjectURL(f)));
+  }
+
+  function removeUploadImage(index) {
+    revokeOne(uploadPreviews[index]);
+
+    const nextImages = uploadImages.filter((_, i) => i !== index);
+    const nextPreviews = uploadPreviews.filter((_, i) => i !== index);
+
+    setUploadImages(nextImages);
+    setUploadPreviews(nextPreviews);
   }
 
   function openOccasionCoverEditorFromFile(file) {
@@ -790,8 +842,8 @@ export default function AdminPage() {
     setOTitle(occasion?.title || "");
     setODesc(occasion?.description || "");
     setODate(occasion?.date || "");
-    setOShowBlessing(typeof occasion?.showBlessing === "boolean" ? occasion.showBlessing : true);
-    setOVideoUrl(occasion?.videoUrl || "");
+    setOShowBlessing(normalizeBoolean(occasion?.showBlessing, true));
+    setOVideoUrl(pickOccasionVideoUrl(occasion));
 
     setOExistingThumbUrls(getOccasionThumbUrls(occasion));
     setOThumbFiles([]);
@@ -1166,9 +1218,16 @@ export default function AdminPage() {
                         <div className="text-right">
                           <div className="font-Vazirmatn text-[#202C28] font-semibold">{o.title}</div>
                           {o.date ? <div className="text-xs text-[#202C28]/70">{o.date}</div> : null}
-                          {o.videoUrl ? (
-                            <div className="text-xs text-[#3C635A] mt-1">يوجد رابط يوتيوب</div>
-                          ) : null}
+
+                          <div className="text-xs text-[#3C635A] mt-1">
+                            المخطوطة: {normalizeBoolean(o?.showBlessing, true) ? "مفعلة" : "مخفية"}
+                          </div>
+
+                          {pickOccasionVideoUrl(o) ? (
+                            <div className="text-xs text-[#3C635A] mt-1">فيديو: موجود</div>
+                          ) : (
+                            <div className="text-xs text-[#3C635A]/70 mt-1">فيديو: لا يوجد</div>
+                          )}
                         </div>
                       }
                       left={
@@ -1380,9 +1439,7 @@ export default function AdminPage() {
                 </div>
               </div>
             ) : oVideoUrl ? (
-              <div className="text-sm text-red-600 font-Vazirmatn text-right">
-                رابط اليوتيوب غير صحيح
-              </div>
+              <div className="text-sm text-red-600 font-Vazirmatn text-right">رابط اليوتيوب غير صحيح</div>
             ) : null}
 
             <div>
@@ -1509,7 +1566,7 @@ export default function AdminPage() {
                 disabled={batchProg.running}
                 onFiles={(files) => mergeAlbumFiles(files)}
                 title="اسحب صور الألبوم هنا أو اضغط للاختيار"
-                hint="سيتم رفع الصور على دفعات"
+                hint="يمكنك السحب أو الاختيار أكثر من مرة، وسيتم جمع الصور حتى تضغط رفع"
               >
                 <div className="flex flex-wrap items-center justify-center gap-3">
                   <label className="cursor-pointer bg-[#3C635A] text-white px-4 py-2 rounded-md inline-block">
@@ -1568,11 +1625,26 @@ export default function AdminPage() {
               </div>
             )}
 
+            {uploadImages.length > 0 ? (
+              <div className="mt-3 text-right text-sm font-Vazirmatn text-[#3C635A]">
+                الصور المضافة قبل الرفع: {uploadImages.length}
+              </div>
+            ) : null}
+
             {uploadPreviews.length > 0 && (
               <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2 mt-3">
                 {uploadPreviews.map((src, idx) => (
-                  <div key={idx} className="rounded-md overflow-hidden border border-[#3C635A]/20">
+                  <div key={idx} className="relative rounded-md overflow-hidden border border-[#3C635A]/20">
                     <img src={src} alt={`new-${idx}`} className="w-full h-20 object-cover" />
+
+                    <button
+                      type="button"
+                      onClick={() => removeUploadImage(idx)}
+                      className="absolute top-1 right-1 bg-red-500 hover:bg-red-600 text-white rounded-md p-1 shadow"
+                      title="حذف الصورة"
+                    >
+                      <FaTrash size={10} />
+                    </button>
                   </div>
                 ))}
               </div>
