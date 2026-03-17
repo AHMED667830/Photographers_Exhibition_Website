@@ -1,85 +1,12 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import Cropper from "react-easy-crop";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { Cropper } from "react-advanced-cropper";
+import "react-advanced-cropper/dist/style.css";
 import api, { getApiErrorMessage } from "../api";
 import { FiUsers } from "react-icons/fi";
 import { BsCamera } from "react-icons/bs";
 import { MdOutlinePhotoLibrary } from "react-icons/md";
 import { FaTrash, FaPen } from "react-icons/fa";
 import Header from "../components/header";
-
-/* ===================== IMAGE EDITOR HELPERS ===================== */
-
-function createImage(url) {
-  return new Promise((resolve, reject) => {
-    const image = new Image();
-    image.addEventListener("load", () => resolve(image));
-    image.addEventListener("error", (error) => reject(error));
-    image.setAttribute("crossOrigin", "anonymous");
-    image.src = url;
-  });
-}
-
-function getRadianAngle(degreeValue) {
-  return (degreeValue * Math.PI) / 180;
-}
-
-function rotateSize(width, height, rotation) {
-  const rotRad = getRadianAngle(rotation);
-  return {
-    width: Math.abs(Math.cos(rotRad) * width) + Math.abs(Math.sin(rotRad) * height),
-    height: Math.abs(Math.sin(rotRad) * width) + Math.abs(Math.cos(rotRad) * height),
-  };
-}
-
-async function getCroppedImg(imageSrc, pixelCrop, rotation = 0) {
-  const image = await createImage(imageSrc);
-
-  const canvas = document.createElement("canvas");
-  const ctx = canvas.getContext("2d");
-
-  const rotRad = getRadianAngle(rotation);
-  const { width: bBoxWidth, height: bBoxHeight } = rotateSize(image.width, image.height, rotation);
-
-  canvas.width = bBoxWidth;
-  canvas.height = bBoxHeight;
-
-  ctx.translate(bBoxWidth / 2, bBoxHeight / 2);
-  ctx.rotate(rotRad);
-  ctx.translate(-image.width / 2, -image.height / 2);
-  ctx.drawImage(image, 0, 0);
-
-  const croppedCanvas = document.createElement("canvas");
-  const croppedCtx = croppedCanvas.getContext("2d");
-
-  croppedCanvas.width = pixelCrop.width;
-  croppedCanvas.height = pixelCrop.height;
-
-  croppedCtx.drawImage(
-    canvas,
-    pixelCrop.x,
-    pixelCrop.y,
-    pixelCrop.width,
-    pixelCrop.height,
-    0,
-    0,
-    pixelCrop.width,
-    pixelCrop.height
-  );
-
-  return new Promise((resolve, reject) => {
-    croppedCanvas.toBlob(
-      (blob) => {
-        if (!blob) {
-          reject(new Error("تعذر إنشاء الصورة"));
-          return;
-        }
-        resolve(blob);
-      },
-      "image/jpeg",
-      0.95
-    );
-  });
-}
 
 /* ===================== UI HELPERS ===================== */
 
@@ -119,6 +46,7 @@ function Button({ className = "", ...props }) {
 
 function Modal({ open, onClose, title, children, max = "max-w-3xl" }) {
   if (!open) return null;
+
   return (
     <div className="fixed inset-0 z-[999]">
       <div className="absolute inset-0 bg-black/50" onClick={onClose} />
@@ -180,6 +108,7 @@ function RowBox({ right, left }) {
 
 function Toast({ open, type = "success", msg, onClose }) {
   if (!open) return null;
+
   return (
     <div className="fixed z-[9999] bottom-4 left-4 right-4 sm:left-auto sm:right-6 sm:w-[460px]">
       <div
@@ -261,6 +190,8 @@ function Dropzone({
 /* ===================== MAIN ===================== */
 
 export default function AdminPage() {
+  const cropperRef = useRef(null);
+
   const PROTECTED_SERVICE_IDS = useMemo(() => new Set([1, 2]), []);
   function isProtectedService(service) {
     return PROTECTED_SERVICE_IDS.has(Number(service?.id));
@@ -269,7 +200,6 @@ export default function AdminPage() {
   const [stats, setStats] = useState({ services: 0, occasions: 0, totalPhotos: 0 });
   const [services, setServices] = useState([]);
   const [occasionsByService, setOccasionsByService] = useState({});
-
   const [loading, setLoading] = useState(true);
 
   const toastTimerRef = useRef(null);
@@ -314,7 +244,7 @@ export default function AdminPage() {
     });
   }
 
-  // ====== SERVICE FORM ======
+  /* ====== SERVICE FORM ====== */
   const [serviceMode, setServiceMode] = useState("add");
   const [editingService, setEditingService] = useState(null);
   const [sName, setSName] = useState("");
@@ -322,7 +252,7 @@ export default function AdminPage() {
   const [sCoverPreviews, setSCoverPreviews] = useState([]);
   const [sExistingCoverUrls, setSExistingCoverUrls] = useState([]);
 
-  // ====== OCCASION FORM ======
+  /* ====== OCCASION FORM ====== */
   const [occasionMode, setOccasionMode] = useState("add");
   const [editingOccasion, setEditingOccasion] = useState(null);
 
@@ -337,7 +267,7 @@ export default function AdminPage() {
   const [oThumbPreviews, setOThumbPreviews] = useState([]);
   const [oExistingThumbUrls, setOExistingThumbUrls] = useState([]);
 
-  // ====== ALBUM MANAGER ======
+  /* ====== ALBUM MANAGER ====== */
   const [openPhotosModal, setOpenPhotosModal] = useState(false);
   const [photosOccasionId, setPhotosOccasionId] = useState(null);
   const [photosLoading, setPhotosLoading] = useState(false);
@@ -348,21 +278,13 @@ export default function AdminPage() {
   const [uploadImages, setUploadImages] = useState([]);
   const [uploadPreviews, setUploadPreviews] = useState([]);
 
-  // ====== IMAGE EDITOR ======
+  /* ====== IMAGE EDITOR ====== */
   const [openCoverEditor, setOpenCoverEditor] = useState(false);
   const [editorImageSrc, setEditorImageSrc] = useState("");
   const [editorTarget, setEditorTarget] = useState(null);
   const [editingServiceCoverIndex, setEditingServiceCoverIndex] = useState(null);
-  const [crop, setCrop] = useState({ x: 0, y: 0 });
-  const [zoom, setZoom] = useState(1);
-  const [rotation, setRotation] = useState(0);
-  const [croppedAreaPixels, setCroppedAreaPixels] = useState(null);
 
-  const onCropComplete = useCallback((_, areaPixels) => {
-    setCroppedAreaPixels(areaPixels);
-  }, []);
-
-  // ====== UPLOAD PROGRESS ======
+  /* ====== UPLOAD PROGRESS ====== */
   const [batchProg, setBatchProg] = useState({
     running: false,
     uploaded: 0,
@@ -443,9 +365,7 @@ export default function AdminPage() {
       if (val === "0") return false;
     }
 
-    if (typeof val === "number") {
-      return val === 1;
-    }
+    if (typeof val === "number") return val === 1;
 
     return fallback;
   }
@@ -457,19 +377,27 @@ export default function AdminPage() {
     try {
       const base = api?.defaults?.baseURL || "";
       const origin = new URL(base).origin;
-      return origin + pathOrUrl;
+      const path = pathOrUrl.startsWith("/") ? pathOrUrl : `/${pathOrUrl}`;
+      return origin + path;
     } catch {
       return pathOrUrl;
     }
   }
 
   function getServiceCoverUrls(service) {
-    const arr = toArr(service?.coverImages);
+    const arr = toArr(service?.coverImages || service?.coverImage);
     return Array.from(new Set(arr.map(getAbsoluteUrlMaybe).filter(Boolean)));
   }
 
   function getOccasionThumbUrls(occasion) {
-    const arr = toArr(occasion?.thumbnails);
+    const arr = toArr(
+      occasion?.thumbnailsSmall ||
+        occasion?.thumbnails ||
+        occasion?.thumbnailSmall ||
+        occasion?.thumbnail ||
+        occasion?.cover ||
+        occasion?.coverImage
+    );
     return Array.from(new Set(arr.map(getAbsoluteUrlMaybe).filter(Boolean)));
   }
 
@@ -539,19 +467,10 @@ export default function AdminPage() {
     setSCoverPreviews(files.map((f) => URL.createObjectURL(f)));
   }
 
-  function mergeServiceFiles(picked) {
-    if (!picked.length) return;
-
-    const onlyImages = picked.filter((f) => f.type.startsWith("image/"));
-    if (!onlyImages.length) return;
-
-    const merged = [...sCovers, ...onlyImages].slice(0, 5);
-
-    if (sCovers.length + onlyImages.length > 5) {
-      showToast("error", "حد الصور 5 فقط (تم تجاهل الزائد)");
-    }
-
-    syncServicePreviewsFromFiles(merged);
+  function syncOccasionPreviewsFromFiles(files) {
+    revokeAll(oThumbPreviews);
+    setOThumbFiles(files);
+    setOThumbPreviews(files.map((f) => URL.createObjectURL(f)));
   }
 
   function mergeAlbumFiles(picked) {
@@ -588,35 +507,27 @@ export default function AdminPage() {
     setUploadPreviews(nextPreviews);
   }
 
-  function openOccasionCoverEditorFromFile(file) {
+  function openOccasionCoverEditorFromFile(file, index = null) {
     if (!file) return;
     const src = URL.createObjectURL(file);
 
     if (editorImageSrc) revokeOne(editorImageSrc);
 
     setEditorImageSrc(src);
-    setEditorTarget("occasion-cover");
-    setEditingServiceCoverIndex(null);
-    setCrop({ x: 0, y: 0 });
-    setZoom(1);
-    setRotation(0);
-    setCroppedAreaPixels(null);
+    setEditorTarget(index === null ? "occasion-cover-add" : "occasion-cover-replace");
+    setEditingServiceCoverIndex(index);
     setOpenCoverEditor(true);
   }
 
-  function openServiceCoverEditorFromFile(file, index) {
+  function openServiceCoverEditorFromFile(file, index = null) {
     if (!file) return;
     const src = URL.createObjectURL(file);
 
     if (editorImageSrc) revokeOne(editorImageSrc);
 
     setEditorImageSrc(src);
-    setEditorTarget("service-cover-replace");
+    setEditorTarget(index === null ? "service-cover-add" : "service-cover-replace");
     setEditingServiceCoverIndex(index);
-    setCrop({ x: 0, y: 0 });
-    setZoom(1);
-    setRotation(0);
-    setCroppedAreaPixels(null);
     setOpenCoverEditor(true);
   }
 
@@ -626,39 +537,57 @@ export default function AdminPage() {
     setEditorImageSrc("");
     setEditorTarget(null);
     setEditingServiceCoverIndex(null);
-    setCrop({ x: 0, y: 0 });
-    setZoom(1);
-    setRotation(0);
-    setCroppedAreaPixels(null);
   }
 
   async function saveEditedCover() {
     try {
-      if (!editorImageSrc || !croppedAreaPixels) {
+      const cropper = cropperRef.current;
+      const canvas = cropper?.getCanvas?.();
+
+      if (!canvas) {
         showToast("error", "تعذر تجهيز الصورة");
         return;
       }
 
-      const blob = await getCroppedImg(editorImageSrc, croppedAreaPixels, rotation);
-      const file = new File([blob], `cover-${Date.now()}.jpg`, { type: "image/jpeg" });
-      const preview = URL.createObjectURL(file);
+      canvas.toBlob(
+        (blob) => {
+          if (!blob) {
+            showToast("error", "تعذر إنشاء الصورة");
+            return;
+          }
 
-      if (editorTarget === "occasion-cover") {
-        revokeAll(oThumbPreviews);
-        setOThumbFiles([file]);
-        setOThumbPreviews([preview]);
-      }
+          const file = new File([blob], `cover-${Date.now()}.jpg`, {
+            type: "image/jpeg",
+          });
 
-      if (editorTarget === "service-cover-replace" && editingServiceCoverIndex !== null) {
-        const nextFiles = [...sCovers];
-        nextFiles[editingServiceCoverIndex] = file;
+          if (editorTarget === "service-cover-add") {
+            const nextFiles = [...sCovers, file].slice(0, 10);
+            syncServicePreviewsFromFiles(nextFiles);
+          }
 
-        revokeOne(preview);
-        syncServicePreviewsFromFiles(nextFiles);
-      }
+          if (editorTarget === "service-cover-replace" && editingServiceCoverIndex !== null) {
+            const nextFiles = [...sCovers];
+            nextFiles[editingServiceCoverIndex] = file;
+            syncServicePreviewsFromFiles(nextFiles);
+          }
 
-      closeEditorModal();
-      showToast("success", "تم تجهيز الصورة ✅");
+          if (editorTarget === "occasion-cover-add") {
+            const nextFiles = [...oThumbFiles, file].slice(0, 2);
+            syncOccasionPreviewsFromFiles(nextFiles);
+          }
+
+          if (editorTarget === "occasion-cover-replace" && editingServiceCoverIndex !== null) {
+            const nextFiles = [...oThumbFiles];
+            nextFiles[editingServiceCoverIndex] = file;
+            syncOccasionPreviewsFromFiles(nextFiles);
+          }
+
+          closeEditorModal();
+          showToast("success", "تم تجهيز الصورة ✅");
+        },
+        "image/jpeg",
+        0.95
+      );
     } catch (err) {
       console.error(err);
       showToast("error", "فشل تعديل الصورة");
@@ -757,19 +686,23 @@ export default function AdminPage() {
     e.preventDefault();
 
     if (!sName.trim()) return showToast("error", "يرجى كتابة عنوان القسم");
-    if (serviceMode === "edit" && !editingService?.id)
+    if (serviceMode === "edit" && !editingService?.id) {
       return showToast("error", "تعذر تحديد القسم للتعديل");
-    if (serviceMode === "add" && (!sCovers || sCovers.length === 0))
-      return showToast("error", "يرجى رفع صورة غلاف واحدة على الأقل");
+    }
+    if (serviceMode === "add" && (!sCovers || sCovers.length === 0)) {
+      return showToast("error", "يرجى رفع صورة قسم واحدة على الأقل");
+    }
 
     try {
       const fd = new FormData();
       fd.append("name", sName);
 
-      [...sCovers].slice(0, 5).forEach((f) => fd.append("coverImages", f));
+      [...sCovers].slice(0, 10).forEach((f) => fd.append("coverImages", f));
 
       if (serviceMode === "add") {
-        await api.post("/services/", fd, { headers: { "Content-Type": "multipart/form-data" } });
+        await api.post("/services/", fd, {
+          headers: { "Content-Type": "multipart/form-data" },
+        });
         showToast("success", "تمت إضافة القسم ✅");
       } else {
         await api.put(`/services/${editingService.id}`, fd, {
@@ -856,10 +789,12 @@ export default function AdminPage() {
     if (!targetServiceId) return;
 
     if (!oTitle.trim()) return showToast("error", "يرجى كتابة عنوان التغطية");
-    if (occasionMode === "add" && oThumbFiles.length === 0)
-      return showToast("error", "يرجى رفع كفر واحد");
-    if (occasionMode === "edit" && !editingOccasion?.id)
+    if (occasionMode === "add" && oThumbFiles.length < 2) {
+      return showToast("error", "يرجى رفع صورتين للكفر: كمبيوتر + جوال");
+    }
+    if (occasionMode === "edit" && !editingOccasion?.id) {
       return showToast("error", "تعذر تحديد التغطية للتعديل");
+    }
 
     try {
       const fd = new FormData();
@@ -869,7 +804,7 @@ export default function AdminPage() {
       fd.append("showBlessing", String(oShowBlessing));
       fd.append("videoUrl", oVideoUrl || "");
 
-      if (oThumbFiles[0]) fd.append("images", oThumbFiles[0]);
+       oThumbFiles.slice(0, 10).forEach((f) => fd.append("thumbnails", f));
 
       if (occasionMode === "add") {
         await api.post(`/services/${targetServiceId}/occasions`, fd, {
@@ -1153,7 +1088,9 @@ export default function AdminPage() {
         <SectionBar title="قسم تعديل الموقع" />
 
         <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 py-10 space-y-10">
-          <div className="text-center text-white/90 text-xl sm:text-2xl font-semibold">تعديل الأقسام الرئيسية</div>
+          <div className="text-center text-white/90 text-xl sm:text-2xl font-semibold">
+            تعديل الأقسام الرئيسية
+          </div>
 
           <div className="flex justify-center">
             <Button type="button" onClick={openAddService} className="bg-[#D8AC4B] text-white hover:opacity-90">
@@ -1197,7 +1134,9 @@ export default function AdminPage() {
 
           {servicesWithOccasions.map((s) => (
             <div key={s.id} className="space-y-4">
-              <div className="text-center text-white/90 text-xl sm:text-2xl font-semibold">تعديل قسم {s.name}</div>
+              <div className="text-center text-white/90 text-xl sm:text-2xl font-semibold">
+                تعديل قسم {s.name}
+              </div>
 
               <div className="flex justify-center">
                 <Button
@@ -1292,13 +1231,19 @@ export default function AdminPage() {
             </div>
 
             <div>
-              <FieldLabel>صور القسم (حد أقصى 5)</FieldLabel>
+              <FieldLabel>صور القسم (حد أقصى 10)</FieldLabel>
 
               <Dropzone
                 multiple
-                onFiles={(picked) => mergeServiceFiles(picked)}
+                onFiles={(picked) => {
+                  const allowed = picked.slice(0, Math.max(0, 10 - sCovers.length));
+                  if (picked.length > allowed.length) {
+                    showToast("error", "حد صور القسم 10 فقط (تم تجاهل الزائد)");
+                  }
+                  allowed.forEach((file) => openServiceCoverEditorFromFile(file, null));
+                }}
                 title="اسحب صور القسم هنا أو اضغط للاختيار"
-                hint="يمكنك بعد الإضافة تعديل أي صورة من الصور المختارة"
+                hint="بعد اختيار كل صورة سيفتح محرر القص الحر"
               >
                 <label className="cursor-pointer bg-[#3C635A] text-white px-6 py-3 rounded-md inline-block">
                   اختيار الصور
@@ -1309,7 +1254,13 @@ export default function AdminPage() {
                     className="hidden"
                     onChange={(e) => {
                       const picked = Array.from(e.target.files || []);
-                      mergeServiceFiles(picked);
+                      const allowed = picked.slice(0, Math.max(0, 10 - sCovers.length));
+
+                      if (picked.length > allowed.length) {
+                        showToast("error", "حد صور القسم 10 فقط (تم تجاهل الزائد)");
+                      }
+
+                      allowed.forEach((file) => openServiceCoverEditorFromFile(file, null));
                       e.target.value = null;
                     }}
                   />
@@ -1318,7 +1269,9 @@ export default function AdminPage() {
 
               {serviceMode === "edit" && sExistingCoverUrls.length > 0 && (
                 <div className="mt-4">
-                  <div className="text-right text-sm font-Vazirmatn text-[#3C635A] mb-2">صور الغلاف الحالية</div>
+                  <div className="text-right text-sm font-Vazirmatn text-[#3C635A] mb-2">
+                    صور الغلاف الحالية
+                  </div>
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                     {sExistingCoverUrls.map((src, idx) => (
                       <div key={idx} className="rounded-md overflow-hidden border border-[#3C635A]/20">
@@ -1342,7 +1295,7 @@ export default function AdminPage() {
                         <div className="absolute top-1 right-1 flex gap-1">
                           <button
                             type="button"
-                            className="bg-yellow-500 hover:bg-yellow-600 text-white rounded-md p-1.5 shadow"
+                            className="bg-[#3C635A] hover:opacity-90 text-white rounded-md p-1.5 shadow"
                             onClick={() => openServiceCoverEditorFromFile(sCovers[idx], idx)}
                             title="تعديل الصورة"
                           >
@@ -1456,28 +1409,37 @@ export default function AdminPage() {
             </div>
 
             <div>
-              <FieldLabel>كفر التغطية (صورة واحدة فقط)</FieldLabel>
+              <FieldLabel>كفر التغطية (صورتان: كمبيوتر + جوال)</FieldLabel>
 
               <Dropzone
-                multiple={false}
+                multiple
                 onFiles={(files) => {
-                  const file = files?.[0];
-                  if (!file) return;
-                  openOccasionCoverEditorFromFile(file);
+                  const allowed = files.slice(0, Math.max(0, 2 - oThumbFiles.length));
+                  if (files.length > allowed.length) {
+                    showToast("error", "حد كفر التغطية صورتان فقط: كمبيوتر + جوال");
+                  }
+
+                  allowed.forEach((file) => openOccasionCoverEditorFromFile(file, null));
                 }}
-                title="اسحب صورة الكفر هنا أو اضغط للاختيار"
-                hint="بعد اختيار الصورة سيفتح محرر الكفر"
+                title="اسحب صور الكفر هنا أو اضغط للاختيار"
+                hint="ارفع صورتين: واحدة للكمبيوتر وواحدة للجوال، وبعد اختيار كل صورة سيفتح محرر القص الحر"
               >
                 <label className="cursor-pointer bg-[#3C635A] text-white px-6 py-3 rounded-md inline-block">
-                  اختيار صورة
+                  اختيار الصور
                   <input
                     type="file"
+                    multiple
                     accept="image/*"
                     className="hidden"
                     onChange={(e) => {
-                      const file = (e.target.files || [])[0];
-                      if (!file) return;
-                      openOccasionCoverEditorFromFile(file);
+                      const files = Array.from(e.target.files || []);
+                      const allowed = files.slice(0, Math.max(0, 2 - oThumbFiles.length));
+
+                      if (files.length > allowed.length) {
+                        showToast("error", "حد كفر التغطية صورتان فقط: كمبيوتر + جوال");
+                      }
+
+                      allowed.forEach((file) => openOccasionCoverEditorFromFile(file, null));
                       e.target.value = null;
                     }}
                   />
@@ -1486,7 +1448,9 @@ export default function AdminPage() {
 
               {occasionMode === "edit" && oExistingThumbUrls.length > 0 && (
                 <div className="mt-4">
-                  <div className="text-right text-sm font-Vazirmatn text-[#3C635A] mb-2">الكفر الحالي</div>
+                  <div className="text-right text-sm font-Vazirmatn text-[#3C635A] mb-2">
+                    الكفر الحالي
+                  </div>
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                     {oExistingThumbUrls.map((url, i) => (
                       <div key={i} className="rounded-md overflow-hidden border border-[#3C635A]/20">
@@ -1506,17 +1470,38 @@ export default function AdminPage() {
                     {oThumbPreviews.map((src, i) => (
                       <div key={i} className="relative rounded-md overflow-hidden border border-[#3C635A]/20">
                         <img src={src} alt={`new-thumb-${i}`} className="w-full h-24 sm:h-28 object-cover" />
-                        <button
-                          type="button"
-                          className="absolute top-1 right-1 bg-red-500 hover:bg-red-600 text-white rounded-md p-1.5 shadow"
-                          onClick={() => {
-                            revokeOne(oThumbPreviews[i]);
-                            setOThumbFiles([]);
-                            setOThumbPreviews([]);
-                          }}
-                        >
-                          <FaTrash size={12} />
-                        </button>
+
+                        <div className="absolute top-1 right-1 flex gap-1">
+                          <button
+                            type="button"
+                            className="bg-[#3C635A] hover:opacity-90 text-white rounded-md p-1.5 shadow"
+                            onClick={() => openOccasionCoverEditorFromFile(oThumbFiles[i], i)}
+                            title="تعديل الصورة"
+                          >
+                            <FaPen size={12} />
+                          </button>
+
+                          <button
+                            type="button"
+                            className="bg-red-500 hover:bg-red-600 text-white rounded-md p-1.5 shadow"
+                            onClick={() => {
+                              revokeOne(oThumbPreviews[i]);
+
+                              const nextFiles = oThumbFiles.filter((_, idx) => idx !== i);
+                              const nextPreviews = oThumbPreviews.filter((_, idx) => idx !== i);
+
+                              setOThumbFiles(nextFiles);
+                              setOThumbPreviews(nextPreviews);
+                            }}
+                            title="حذف الصورة"
+                          >
+                            <FaTrash size={12} />
+                          </button>
+                        </div>
+
+                        <div className="absolute bottom-1 left-1 bg-black/60 text-white text-[10px] px-2 py-1 rounded font-Vazirmatn">
+                          {i === 0 ? "الصورة 1" : "الصورة 2"}
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -1728,66 +1713,25 @@ export default function AdminPage() {
             <div className="relative w-full h-[420px] rounded-md overflow-hidden bg-[#202C28]">
               {editorImageSrc ? (
                 <Cropper
-                  image={editorImageSrc}
-                  crop={crop}
-                  zoom={zoom}
-                  rotation={rotation}
-                  aspect={16 / 9}
-                  onCropChange={setCrop}
-                  onZoomChange={setZoom}
-                  onRotationChange={setRotation}
-                  onCropComplete={onCropComplete}
+                  ref={cropperRef}
+                  src={editorImageSrc}
+                  className="h-full w-full"
+                  imageRestriction="fit-area"
+                  stencilProps={{
+                    movable: true,
+                    resizable: true,
+                    lines: true,
+                    handlers: true,
+                  }}
                 />
               ) : null}
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-              <div>
-                <FieldLabel>التكبير / التصغير</FieldLabel>
-                <input
-                  type="range"
-                  min={1}
-                  max={3}
-                  step={0.1}
-                  value={zoom}
-                  onChange={(e) => setZoom(Number(e.target.value))}
-                  className="w-full"
-                />
-                <div className="text-sm text-[#3C635A] mt-1 font-Vazirmatn">{zoom.toFixed(1)}x</div>
-              </div>
-
-              <div>
-                <FieldLabel>اللف</FieldLabel>
-                <input
-                  type="range"
-                  min={-180}
-                  max={180}
-                  step={1}
-                  value={rotation}
-                  onChange={(e) => setRotation(Number(e.target.value))}
-                  className="w-full"
-                />
-                <div className="text-sm text-[#3C635A] mt-1 font-Vazirmatn">{rotation}°</div>
-              </div>
+            <div className="text-sm text-[#3C635A] font-Vazirmatn text-right">
+              القص هنا حر بالكامل — اسحب وحدد أي مقاس تبيه.
             </div>
 
             <div className="flex flex-wrap justify-end gap-3">
-              <Button
-                type="button"
-                className="bg-white border border-[#3C635A]/20 text-[#3C635A]"
-                onClick={() => setRotation((r) => r - 90)}
-              >
-                لف يسار 90°
-              </Button>
-
-              <Button
-                type="button"
-                className="bg-white border border-[#3C635A]/20 text-[#3C635A]"
-                onClick={() => setRotation((r) => r + 90)}
-              >
-                لف يمين 90°
-              </Button>
-
               <Button
                 type="button"
                 onClick={closeEditorModal}

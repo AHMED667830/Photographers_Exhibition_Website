@@ -226,11 +226,11 @@ export default function OccasionDetails() {
 
         <div className="absolute inset-0 bg-black/45" />
 
-        <div className="absolute inset-0 flex items-center justify-center px-4 z-10">
-          <h1 className="translate-y-8 md:translate-y-12 text-[#E7F2E2] text-3xl md:text-5xl font-bold text-center">
-            {title}
-          </h1>
-        </div>
+      <div className="absolute inset-x-0 bottom-40 md:bottom-40 px-4 z-10 flex justify-center">
+  <h1 className="text-[#E7F2E2] text-3xl md:text-5xl font-bold text-center leading-tight">
+    {title}
+  </h1>
+</div>
       </div>
 
       <div dir="rtl" className="relative z--20 -mt-16 sm:-mt-30 md:-mt-20 lg:-mt-30 pointer-events-none">
