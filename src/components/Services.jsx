@@ -11,6 +11,10 @@ const SERVICE_PHRASES = {
   تغطيات: ["صدارة المشهد"],
 };
 
+const MOBILE_RATIO = 9 / 16;
+const DESKTOP_RATIO = 16 / 9;
+const RATIO_TOLERANCE = 0.22;
+
 const resolveUrl = (p) => {
   if (!p) return "";
   if (p.startsWith("http")) return p;
@@ -30,6 +34,7 @@ function parseImageVal(val) {
     try {
       const parsed = JSON.parse(val);
       if (Array.isArray(parsed)) return parsed;
+
       return String(parsed)
         .split(",")
         .map((s) => s.trim())
@@ -48,6 +53,7 @@ function parseImageVal(val) {
 function loadImageSize(src) {
   return new Promise((resolve) => {
     const img = new Image();
+
     img.onload = () => {
       resolve({
         src,
@@ -55,37 +61,63 @@ function loadImageSize(src) {
         height: img.naturalHeight || 0,
       });
     };
+
     img.onerror = () => {
-      resolve({
-        src,
-        width: 0,
-        height: 0,
-      });
+      resolve(null);
     };
+
     img.src = src;
   });
 }
 
-async function classifyImagesByDevice(urls) {
-  const sized = await Promise.all(urls.map(loadImageSize));
-
-  const mobile = [];
-  const desktop = [];
-
-  for (const item of sized) {
-    if (!item.src) continue;
-
-    if (item.height > item.width) {
-      mobile.push(item.src);
-    } else {
-      desktop.push(item.src);
+function preloadImage(src) {
+  return new Promise((resolve) => {
+    if (!src) {
+      resolve();
+      return;
     }
+
+    const img = new Image();
+    img.onload = () => resolve();
+    img.onerror = () => resolve();
+    img.src = src;
+  });
+}
+
+async function preloadImages(urls = []) {
+  await Promise.all(urls.map(preloadImage));
+}
+
+function getRatioScore(width, height, targetRatio) {
+  if (!width || !height) return Number.MAX_SAFE_INTEGER;
+  const ratio = width / height;
+  return Math.abs(ratio - targetRatio);
+}
+
+async function pickImagesByDevice(urls) {
+  const sized = (await Promise.all(urls.map(loadImageSize))).filter(Boolean);
+
+  if (!sized.length) {
+    return {
+      mobile: [],
+      desktop: [],
+      all: [],
+    };
   }
 
+  // فلترة فقط مع الحفاظ على الترتيب الأصلي
+  const mobile = sized.filter(
+    (img) => getRatioScore(img.width, img.height, MOBILE_RATIO) <= RATIO_TOLERANCE
+  );
+
+  const desktop = sized.filter(
+    (img) => getRatioScore(img.width, img.height, DESKTOP_RATIO) <= RATIO_TOLERANCE
+  );
+
   return {
-    mobile,
-    desktop,
-    all: sized.map((x) => x.src).filter(Boolean),
+    mobile: mobile.map((x) => x.src),
+    desktop: desktop.map((x) => x.src),
+    all: sized.map((x) => x.src),
   };
 }
 
@@ -126,15 +158,15 @@ function ServiceCard({ service, isFirst, onHoverPrefetch }) {
     "تفاصيل تليق بذكراك",
   ];
 
-  const [index, setIndex] = useState(0);
-  const [nextIndex, setNextIndex] = useState(1);
-  const [fading, setFading] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const [incomingIndex, setIncomingIndex] = useState(null);
+  const [isFading, setIsFading] = useState(false);
 
   const [mode, setMode] = useState("service");
   const [phraseIndex, setPhraseIndex] = useState(0);
 
   const intervalRef = useRef(null);
-  const loadedRef = useRef(new Set());
+  const fadeTimeoutRef = useRef(null);
   const textTimerRef = useRef(null);
 
   useEffect(() => {
@@ -143,76 +175,110 @@ function ServiceCard({ service, isFirst, onHoverPrefetch }) {
     async function run() {
       setReadySlides(false);
 
-      const classified = await classifyImagesByDevice(allUrls);
-      const mobile = classified.mobile;
-      const desktop = classified.desktop;
+      const picked = await pickImagesByDevice(allUrls);
 
       let chosen = [];
 
       if (isMobileScreen()) {
-        chosen = mobile.length ? mobile : desktop.length ? desktop : classified.all;
+        chosen = picked.mobile.length ? picked.mobile : picked.all;
       } else {
-        chosen = desktop.length ? desktop : mobile.length ? mobile : classified.all;
+        chosen = picked.desktop.length ? picked.desktop : picked.all;
       }
 
       if (!mounted) return;
 
+      if (!chosen.length) {
+        setSlides([]);
+        setActiveIndex(0);
+        setIncomingIndex(null);
+        setIsFading(false);
+        setReadySlides(true);
+        return;
+      }
+
+      await preloadImages(chosen);
+
+      if (!mounted) return;
+
       setSlides(chosen);
+      setActiveIndex(0);
+      setIncomingIndex(chosen.length > 1 ? 1 : null);
+      setIsFading(false);
       setReadySlides(true);
     }
 
     run();
 
+    let resizeTimeout;
+    const handleResize = () => {
+      clearTimeout(resizeTimeout);
+      resizeTimeout = setTimeout(() => {
+        run();
+      }, 150);
+    };
+
+    window.addEventListener("resize", handleResize);
+
     return () => {
       mounted = false;
+      clearTimeout(resizeTimeout);
+      window.removeEventListener("resize", handleResize);
     };
   }, [allUrls]);
 
   const len = slides.length;
-  const currentSrc = len ? slides[index % len] : "";
-  const nextSrc = len ? slides[nextIndex % len] : "";
+  const currentSrc = len ? slides[activeIndex % len] : "";
+  const nextRealIndex =
+    len > 1
+      ? incomingIndex !== null
+        ? incomingIndex % len
+        : (activeIndex + 1) % len
+      : null;
+  const nextSrc = nextRealIndex !== null ? slides[nextRealIndex] : "";
 
   useEffect(() => {
-    setIndex(0);
-    setNextIndex(len > 1 ? 1 : 0);
-    setFading(false);
-    loadedRef.current = new Set();
-    if (slides[0]) loadedRef.current.add(slides[0]);
-  }, [service?.id, len, slides]);
+    if (fadeTimeoutRef.current) {
+      clearTimeout(fadeTimeoutRef.current);
+      fadeTimeoutRef.current = null;
+    }
 
-  useEffect(() => {
-    if (!nextSrc || loadedRef.current.has(nextSrc)) return;
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
 
-    const img = new Image();
-    img.onload = () => loadedRef.current.add(nextSrc);
-    img.src = nextSrc;
-  }, [nextSrc]);
+    if (!readySlides || len <= 1) return;
 
-  useEffect(() => {
-    if (len <= 1) return;
+    intervalRef.current = setInterval(async () => {
+      if (isFading) return;
 
-    if (intervalRef.current) clearInterval(intervalRef.current);
+      const nextIndexToShow = (activeIndex + 1) % len;
+      const nextImage = slides[nextIndexToShow];
 
-    intervalRef.current = setInterval(() => {
-      if (fading) return;
-      if (!nextSrc) return;
-      if (!loadedRef.current.has(nextSrc)) return;
+      await preloadImage(nextImage);
 
-      setFading(true);
+      setIncomingIndex(nextIndexToShow);
+      setIsFading(true);
+
+      fadeTimeoutRef.current = setTimeout(() => {
+        setActiveIndex(nextIndexToShow);
+        setIncomingIndex((nextIndexToShow + 1) % len);
+        setIsFading(false);
+      }, 1100);
     }, 7500);
 
-    return () => clearInterval(intervalRef.current);
-  }, [len, nextSrc, fading]);
+    return () => {
+      if (fadeTimeoutRef.current) {
+        clearTimeout(fadeTimeoutRef.current);
+        fadeTimeoutRef.current = null;
+      }
 
-  const onNextTransitionEnd = (e) => {
-    if (e.target !== e.currentTarget) return;
-    if (!fading || len <= 1) return;
-
-    const newIndex = nextIndex % len;
-    setIndex(newIndex);
-    setNextIndex((newIndex + 1) % len);
-    setFading(false);
-  };
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+    };
+  }, [readySlides, len, slides, activeIndex, isFading]);
 
   useEffect(() => {
     if (textTimerRef.current) clearTimeout(textTimerRef.current);
@@ -279,35 +345,34 @@ function ServiceCard({ service, isFirst, onHoverPrefetch }) {
       ) : currentSrc ? (
         <>
           <div
-            className={`absolute inset-0 block w-full h-full transition-all duration-[2600ms] ease-[cubic-bezier(0.22,1,0.36,1)] will-change-transform will-change-opacity ${
-              fading ? "opacity-0 scale-[1.08]" : "opacity-100 scale-[1.015]"
+            className={`absolute inset-0 block w-full h-full transition-opacity duration-[1100ms] ease-in-out ${
+              isFading ? "opacity-0" : "opacity-100"
             }`}
           >
             <img
               src={currentSrc}
               alt={service.name}
-              className="absolute inset-0 w-full h-full object-cover transform-gpu"
+              className="absolute inset-0 w-full h-full object-cover"
               loading={isFirst ? "eager" : "lazy"}
               fetchPriority={isFirst ? "high" : "auto"}
               decoding="async"
-              onLoad={() => loadedRef.current.add(currentSrc)}
+              draggable="false"
             />
           </div>
 
           {len > 1 && nextSrc ? (
             <div
-              onTransitionEnd={onNextTransitionEnd}
-              className={`absolute inset-0 block w-full h-full transition-all duration-[2600ms] ease-[cubic-bezier(0.22,1,0.36,1)] will-change-transform will-change-opacity ${
-                fading ? "opacity-100 scale-[1.015]" : "opacity-0 scale-[1.04]"
+              className={`absolute inset-0 block w-full h-full transition-opacity duration-[1100ms] ease-in-out ${
+                isFading ? "opacity-100" : "opacity-0"
               }`}
             >
               <img
                 src={nextSrc}
                 alt=""
-                className="absolute inset-0 w-full h-full object-cover transform-gpu"
+                className="absolute inset-0 w-full h-full object-cover"
                 loading="lazy"
                 decoding="async"
-                onLoad={() => loadedRef.current.add(nextSrc)}
+                draggable="false"
               />
             </div>
           ) : null}
@@ -323,7 +388,7 @@ function ServiceCard({ service, isFirst, onHoverPrefetch }) {
         <div className="relative flex items-center justify-center min-h-[90px] md:min-h-[110px] min-w-[320px] md:min-w-[500px] px-4">
           {showService && (
             <h2
-              className={`absolute font-Vazirmatn text-white text-4xl md:text-6xl font-bold text-center transition-all duration-[1200ms] ease-[cubic-bezier(0.22,1,0.36,1)] ${serviceClass}`}
+              className={`font-Vazirmatn absolute text-center text-4xl font-bold text-white transition-all duration-[1200ms] ease-[cubic-bezier(0.22,1,0.36,1)] md:text-6xl ${serviceClass}`}
             >
               {service.name}
             </h2>
@@ -331,7 +396,7 @@ function ServiceCard({ service, isFirst, onHoverPrefetch }) {
 
           {showPhrase && (
             <h2
-              className={`absolute font-Vazirmatn text-white text-4xl md:text-6xl font-bold text-center transition-all duration-[1200ms] ease-[cubic-bezier(0.22,1,0.36,1)] ${phraseClass}`}
+              className={`font-Vazirmatn absolute text-center text-4xl font-bold text-white transition-all duration-[1200ms] ease-[cubic-bezier(0.22,1,0.36,1)] md:text-6xl ${phraseClass}`}
             >
               {phrases[phraseIndex]}
             </h2>
@@ -370,7 +435,7 @@ export default function Services() {
       {isFetching && services.length === 0 ? (
         <SkeletonServices />
       ) : services.length === 0 ? (
-        <div className="w-full h-screen flex items-center justify-center text-white bg-[#202C28] font-Vazirmatn">
+        <div className="font-Vazirmatn flex h-screen w-full items-center justify-center bg-[#202C28] text-white">
           لا توجد خدمات
         </div>
       ) : (

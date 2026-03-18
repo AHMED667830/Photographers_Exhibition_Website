@@ -5,6 +5,7 @@ import Header from "./components/header";
 import Footer from "./components/Footer";
 
 // Components / Pages
+import ScrollToTopButton from "./components/ScrollToTopButton";
 import Services from "./components/Services";
 import Commentcards from "./components/Commentcards";
 import Corporatecards from "./components/Corporatecards";
@@ -41,6 +42,7 @@ function SiteLayout({ children }) {
       {children}
       <Footer />
       <SiteCredit />
+       <ScrollToTopButton />
     </>
   );
 }

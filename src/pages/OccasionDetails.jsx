@@ -1,10 +1,12 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Helmet } from "react-helmet-async";
 import api from "../api";
 
 const ASSET_BASE = import.meta.env.VITE_ASSET_BASE_URL;
+const MOBILE_RATIO = 9 / 16;
+const DESKTOP_RATIO = 16 / 9;
 
 const resolveUrl = (p) => {
   if (!p) return "";
@@ -71,16 +73,13 @@ function pickPhotoUrl(p) {
   return `${base}uploads/${filename}`;
 }
 
-function pickOccasionCover(o) {
-  const parsedArr = parseImageVal(o?.thumbnailsSmall || o?.thumbnails || o?.thumbs);
-  if (parsedArr.length > 0) return parsedArr[0];
+function getOccasionCoverCandidates(o) {
+  const fromArrays = parseImageVal(o?.thumbnailsSmall || o?.thumbnails || o?.thumbs);
+  const fromSingles = parseImageVal(
+    o?.thumbnailSmall || o?.thumbnail || o?.coverSmall || o?.cover
+  );
 
-  const singleStr = o?.thumbnailSmall || o?.thumbnail || o?.coverSmall || o?.cover;
-  if (singleStr && typeof singleStr === "string") {
-    const singleParsed = parseImageVal(singleStr);
-    return singleParsed[0] || singleStr;
-  }
-  return "";
+  return [...fromArrays, ...fromSingles].filter(Boolean);
 }
 
 function getWeekdayName(dateStr) {
@@ -153,8 +152,44 @@ function getYoutubeEmbedUrl(url = "") {
   return `https://www.youtube.com/embed/${id}`;
 }
 
+function loadImageSize(src) {
+  return new Promise((resolve) => {
+    const img = new Image();
+
+    img.onload = () => {
+      resolve({
+        src,
+        width: img.naturalWidth || 0,
+        height: img.naturalHeight || 0,
+      });
+    };
+
+    img.onerror = () => {
+      resolve({
+        src,
+        width: 0,
+        height: 0,
+      });
+    };
+
+    img.src = src;
+  });
+}
+
+function getRatioScore(width, height, targetRatio) {
+  if (!width || !height) return Number.MAX_SAFE_INTEGER;
+  const ratio = width / height;
+  return Math.abs(ratio - targetRatio);
+}
+
+function isMobileScreen() {
+  if (typeof window === "undefined") return false;
+  return window.innerWidth < 768;
+}
+
 export default function OccasionDetails() {
   const { serviceId, occasionId } = useParams();
+  const [cover, setCover] = useState("");
 
   useEffect(() => {
     window.scrollTo(0, 0);
@@ -184,7 +219,54 @@ export default function OccasionDetails() {
   const desc = occasion.description || "";
   const date = occasion.date || "";
   const day = occasion.day || occasion.weekday || getWeekdayName(date);
-  const cover = resolveUrl(pickOccasionCover(occasion));
+
+  const coverCandidates = useMemo(() => {
+    return getOccasionCoverCandidates(occasion).map(resolveUrl).filter(Boolean);
+  }, [occasion]);
+
+  useEffect(() => {
+    let mounted = true;
+
+    async function pickBestCover() {
+      if (!coverCandidates.length) {
+        setCover("");
+        return;
+      }
+
+      const sized = (await Promise.all(coverCandidates.map(loadImageSize))).filter((img) => img?.src);
+
+      if (!mounted) return;
+
+      if (!sized.length) {
+        setCover(coverCandidates[0] || "");
+        return;
+      }
+
+      const targetRatio = isMobileScreen() ? MOBILE_RATIO : DESKTOP_RATIO;
+
+      const best = [...sized].sort(
+        (a, b) =>
+          getRatioScore(a.width, a.height, targetRatio) -
+          getRatioScore(b.width, b.height, targetRatio)
+      )[0];
+
+      setCover(best?.src || coverCandidates[0] || "");
+    }
+
+    pickBestCover();
+
+    const handleResize = () => {
+      pickBestCover();
+    };
+
+    window.addEventListener("resize", handleResize);
+
+    return () => {
+      mounted = false;
+      window.removeEventListener("resize", handleResize);
+    };
+  }, [coverCandidates]);
+
   const videoUrl = pickOccasionVideoUrl(occasion);
   const youtubeEmbedUrl = getYoutubeEmbedUrl(videoUrl);
 
@@ -226,11 +308,11 @@ export default function OccasionDetails() {
 
         <div className="absolute inset-0 bg-black/45" />
 
-      <div className="absolute inset-x-0 bottom-40 md:bottom-40 px-4 z-10 flex justify-center">
-  <h1 className="text-[#E7F2E2] text-3xl md:text-5xl font-bold text-center leading-tight">
-    {title}
-  </h1>
-</div>
+        <div className="absolute inset-x-0 bottom-40 md:bottom-40 px-4 z-10 flex justify-center">
+          <h1 className="text-[#E7F2E2] text-3xl md:text-5xl font-bold text-center leading-tight">
+            {title}
+          </h1>
+        </div>
       </div>
 
       <div dir="rtl" className="relative z--20 -mt-16 sm:-mt-30 md:-mt-20 lg:-mt-30 pointer-events-none">
